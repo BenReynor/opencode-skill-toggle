@@ -116,7 +116,7 @@ jobs:
               --title "opencode $VERSION + skill-toggle" \
               --notes "Build custom de opencode **$VERSION** con el toggle de skills persistente.
 
-Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\`"
+              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\`"
           fi
 
       - name: Publish rolling "latest" assets
