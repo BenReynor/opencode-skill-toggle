@@ -1,0 +1,854 @@
+diff --git a/packages/opencode/src/server/routes/instance/httpapi/api.ts b/packages/opencode/src/server/routes/instance/httpapi/api.ts
+index f5076ad..5fabc03 100644
+--- a/packages/opencode/src/server/routes/instance/httpapi/api.ts
++++ b/packages/opencode/src/server/routes/instance/httpapi/api.ts
+@@ -16,6 +16,7 @@ import { FileApi } from "./groups/file"
+ import { InstanceApi } from "./groups/instance"
+ import { McpApi } from "./groups/mcp"
+ import { PermissionApi } from "./groups/permission"
++import { SkillApi } from "./groups/skill"
+ import { ProjectApi } from "./groups/project"
+ import { ProjectCopyApi } from "./groups/project-copy"
+ import { ProviderApi } from "./groups/provider"
+@@ -71,6 +72,7 @@ export const InstanceHttpApi = HttpApi.make("opencode-instance")
+   .addHttpApi(PermissionApi)
+   .addHttpApi(ProviderApi)
+   .addHttpApi(SessionApi)
++  .addHttpApi(SkillApi)
+   .addHttpApi(SyncApi)
+   .addHttpApi(TuiApi)
+   .addHttpApi(WorkspaceApi)
+diff --git a/packages/opencode/src/server/routes/instance/httpapi/groups/skill.ts b/packages/opencode/src/server/routes/instance/httpapi/groups/skill.ts
+new file mode 100644
+index 0000000..124df56
+--- /dev/null
++++ b/packages/opencode/src/server/routes/instance/httpapi/groups/skill.ts
+@@ -0,0 +1,69 @@
++import { Schema } from "effect"
++import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
++import { described } from "./metadata"
++import { Authorization } from "../middleware/authorization"
++import { InstanceContextMiddleware } from "../middleware/instance-context"
++import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
++
++export const SkillStatusMap = Schema.Record(Schema.String, Schema.Boolean)
++
++export const SkillPaths = {
++  status: "/skill/status",
++  enable: "/skill/:name/enable",
++  disable: "/skill/:name/disable",
++} as const
++
++export const SkillApi = HttpApi.make("skill")
++  .add(
++    HttpApiGroup.make("skill")
++      .add(
++        HttpApiEndpoint.get("status", SkillPaths.status, {
++          query: WorkspaceRoutingQuery,
++          success: described(SkillStatusMap, "Skill enabled status"),
++        }).annotateMerge(
++          OpenApi.annotations({
++            identifier: "skill.status",
++            summary: "Get skill status",
++            description: "Get the enabled/disabled status of all agent skills.",
++          }),
++        ),
++        HttpApiEndpoint.post("enable", SkillPaths.enable, {
++          params: { name: Schema.String },
++          query: WorkspaceRoutingQuery,
++          success: described(Schema.Boolean, "Skill enabled successfully"),
++        }).annotateMerge(
++          OpenApi.annotations({
++            identifier: "skill.enable",
++            summary: "Enable skill",
++            description: "Enable an agent skill so it appears in the available skills list.",
++          }),
++        ),
++        HttpApiEndpoint.post("disable", SkillPaths.disable, {
++          params: { name: Schema.String },
++          query: WorkspaceRoutingQuery,
++          success: described(Schema.Boolean, "Skill disabled successfully"),
++        }).annotateMerge(
++          OpenApi.annotations({
++            identifier: "skill.disable",
++            summary: "Disable skill",
++            description: "Disable an agent skill so it is hidden from the available skills list.",
++          }),
++        ),
++      )
++      .annotateMerge(
++        OpenApi.annotations({
++          title: "skill",
++          description: "HttpApi Skill toggle routes.",
++        }),
++      )
++      .middleware(InstanceContextMiddleware)
++      .middleware(WorkspaceRoutingMiddleware)
++      .middleware(Authorization),
++  )
++  .annotateMerge(
++    OpenApi.annotations({
++      title: "opencode experimental HttpApi",
++      version: "0.0.1",
++      description: "Experimental HttpApi surface for selected instance routes.",
++    }),
++  )
+diff --git a/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts b/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts
+new file mode 100644
+index 0000000..1c023d2
+--- /dev/null
++++ b/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts
+@@ -0,0 +1,29 @@
++import { Skill } from "@/skill"
++import { Effect } from "effect"
++import { HttpApiBuilder } from "effect/unstable/httpapi"
++import { InstanceHttpApi } from "../api"
++
++export const skillHandlers = HttpApiBuilder.group(InstanceHttpApi, "skill", (handlers) =>
++  Effect.gen(function* () {
++    const skill = yield* Skill.Service
++
++    const status = Effect.fn("SkillHttpApi.status")(function* () {
++      return yield* skill.status()
++    })
++
++    const enable = Effect.fn("SkillHttpApi.enable")(function* (ctx: { params: { name: string } }) {
++      yield* skill.enable(ctx.params.name)
++      return true
++    })
++
++    const disable = Effect.fn("SkillHttpApi.disable")(function* (ctx: { params: { name: string } }) {
++      yield* skill.disable(ctx.params.name)
++      return true
++    })
++
++    return handlers
++      .handle("status", status)
++      .handle("enable", enable)
++      .handle("disable", disable)
++  }),
++)
+diff --git a/packages/opencode/src/server/routes/instance/httpapi/server.ts b/packages/opencode/src/server/routes/instance/httpapi/server.ts
+index fb9d2db..87964f4 100644
+--- a/packages/opencode/src/server/routes/instance/httpapi/server.ts
++++ b/packages/opencode/src/server/routes/instance/httpapi/server.ts
+@@ -90,6 +90,7 @@ import { fileHandlers } from "./handlers/file"
+ import { globalHandlers } from "./handlers/global"
+ import { instanceHandlers } from "./handlers/instance"
+ import { mcpHandlers } from "./handlers/mcp"
++import { skillHandlers } from "./handlers/skill"
+ import { permissionHandlers } from "./handlers/permission"
+ import { projectHandlers } from "./handlers/project"
+ import { projectCopyHandlers } from "./handlers/project-copy"
+@@ -158,6 +159,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
+     fileHandlers,
+     instanceHandlers,
+     mcpHandlers,
++    skillHandlers,
+     projectHandlers,
+     projectCopyHandlers,
+     ptyHandlers,
+diff --git a/packages/opencode/src/skill/index.ts b/packages/opencode/src/skill/index.ts
+index 5a04ec2..658497f 100644
+--- a/packages/opencode/src/skill/index.ts
++++ b/packages/opencode/src/skill/index.ts
+@@ -100,6 +100,9 @@ export interface Interface {
+   readonly all: () => Effect.Effect<Info[]>
+   readonly dirs: () => Effect.Effect<string[]>
+   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
++  readonly status: () => Effect.Effect<Record<string, boolean>>
++  readonly enable: (name: string) => Effect.Effect<void>
++  readonly disable: (name: string) => Effect.Effect<void>
+ }
+ 
+ const add = Effect.fnUntraced(function* (state: State, match: string, events: EventV2Bridge.Service["Service"]) {
+@@ -294,7 +297,13 @@ const layer = Layer.effect(
+     const require = Effect.fn("Skill.require")(function* (name: string) {
+       const s = yield* InstanceState.get(state)
+       const info = s.skills[name]
+-      if (info) return info
++      if (info && enabled.get(name) !== false) return info
++      if (info && enabled.get(name) === false) {
++        return yield* new NotFoundError({
++          name,
++          available: Object.keys(s.skills).filter((n) => enabled.get(n) !== false).toSorted(),
++        })
++      }
+       return yield* new NotFoundError({ name, available: Object.keys(s.skills).toSorted() })
+     })
+ 
+@@ -307,14 +316,78 @@ const layer = Layer.effect(
+       return (yield* InstanceState.get(discovered)).dirs
+     })
+ 
++    const toggleFile = () => path.join(global.data, "skills-toggle.json")
++
++    let enabled = new Map<string, boolean>()
++    const persisted = yield* fsys.readFileStringSafe(toggleFile())
++    if (persisted) {
++      let parsed: unknown = null
++      try {
++        parsed = JSON.parse(persisted)
++      } catch {
++        parsed = null
++      }
++      if (isRecord(parsed)) {
++        for (const [name, value] of Object.entries(parsed)) {
++          if (typeof value === "boolean") enabled.set(name, value)
++        }
++      }
++    }
++    yield* Effect.logInfo("skill toggle state loaded", { count: enabled.size })
++
++    const persistToggle = Effect.fn("Skill.persistToggle")(function* () {
++      yield* fsys.writeJson(toggleFile(), Object.fromEntries(enabled))
++    })
++
+     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
+       const s = yield* InstanceState.get(state)
+-      const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
++      const list = Object.values(s.skills)
++        .filter((skill) => enabled.get(skill.name) !== false)
++        .toSorted((a, b) => a.name.localeCompare(b.name))
+       if (!agent) return list
+       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
+     })
+ 
+-    return Service.of({ get, require, all, dirs, available })
++    const status = Effect.fn("Skill.status")(function* () {
++      const s = yield* InstanceState.get(state)
++      const result: Record<string, boolean> = {}
++      for (const name of Object.keys(s.skills)) {
++        result[name] = enabled.get(name) !== false
++      }
++      return result
++    })
++
++    const enable = Effect.fn("Skill.enable")(function* (name: string) {
++      const s = yield* InstanceState.get(state)
++      if (!(name in s.skills)) {
++        yield* Effect.logInfo("skill enable skipped (not found)", { name })
++        return
++      }
++      if (enabled.get(name) === true) {
++        yield* Effect.logInfo("skill already enabled", { name })
++        return
++      }
++      enabled.set(name, true)
++      yield* persistToggle()
++      yield* Effect.logInfo("skill enabled", { name })
++    })
++
++    const disable = Effect.fn("Skill.disable")(function* (name: string) {
++      const s = yield* InstanceState.get(state)
++      if (!(name in s.skills)) {
++        yield* Effect.logInfo("skill disable skipped (not found)", { name })
++        return
++      }
++      if (enabled.get(name) === false) {
++        yield* Effect.logInfo("skill already disabled", { name })
++        return
++      }
++      enabled.set(name, false)
++      yield* persistToggle()
++      yield* Effect.logInfo("skill disabled", { name })
++    })
++
++    return Service.of({ get, require, all, dirs, available, status, enable, disable })
+   }),
+ )
+ 
+diff --git a/packages/opencode/test/session/system.test.ts b/packages/opencode/test/session/system.test.ts
+index 09bac3f..ad34ec0 100644
+--- a/packages/opencode/test/session/system.test.ts
++++ b/packages/opencode/test/session/system.test.ts
+@@ -77,6 +77,9 @@ const it = testEffect(
+           all: () => Effect.succeed(skills),
+           dirs: () => Effect.succeed([]),
+           available: () => Effect.succeed(skills),
++          status: () => Effect.succeed(Object.fromEntries(skills.map((skill) => [skill.name, true]))),
++          enable: () => Effect.void,
++          disable: () => Effect.void,
+         }),
+       ),
+     ],
+diff --git a/packages/sdk/js/src/v2/gen/sdk.gen.ts b/packages/sdk/js/src/v2/gen/sdk.gen.ts
+index a2bcd42..7c87448 100644
+--- a/packages/sdk/js/src/v2/gen/sdk.gen.ts
++++ b/packages/sdk/js/src/v2/gen/sdk.gen.ts
+@@ -111,6 +111,12 @@ import type {
+   McpRemoteConfig,
+   McpStatusErrors,
+   McpStatusResponses,
++  SkillDisableErrors,
++  SkillDisableResponses,
++  SkillEnableErrors,
++  SkillEnableResponses,
++  SkillStatusErrors,
++  SkillStatusResponses,
+   ModelRef,
+   MoveSessionDestination,
+   OutputFormat,
+@@ -2527,6 +2533,102 @@ export class Mcp extends HeyApiClient {
+   }
+ }
+ 
++export class Skill2 extends HeyApiClient {
++  /**
++   * Get skill status
++   *
++   * Get the enabled/disabled status of all agent skills.
++   */
++  public status<ThrowOnError extends boolean = false>(
++    parameters?: {
++      directory?: string
++      workspace?: string
++    },
++    options?: Options<never, ThrowOnError>,
++  ) {
++    const params = buildClientParams(
++      [parameters],
++      [
++        {
++          args: [
++            { in: "query", key: "directory" },
++            { in: "query", key: "workspace" },
++          ],
++        },
++      ],
++    )
++    return (options?.client ?? this.client).get<SkillStatusResponses, SkillStatusErrors, ThrowOnError>({
++      url: "/skill/status",
++      ...options,
++      ...params,
++    })
++  }
++
++  /**
++   * Enable skill
++   *
++   * Enable an agent skill so it appears in the available skills list.
++   */
++  public enable<ThrowOnError extends boolean = false>(
++    parameters: {
++      name: string
++      directory?: string
++      workspace?: string
++    },
++    options?: Options<never, ThrowOnError>,
++  ) {
++    const params = buildClientParams(
++      [parameters],
++      [
++        {
++          args: [
++            { in: "path", key: "name" },
++            { in: "query", key: "directory" },
++            { in: "query", key: "workspace" },
++          ],
++        },
++      ],
++    )
++    return (options?.client ?? this.client).post<SkillEnableResponses, SkillEnableErrors, ThrowOnError>({
++      url: "/skill/{name}/enable",
++      ...options,
++      ...params,
++    })
++  }
++
++  /**
++   * Disable skill
++   *
++   * Disable an agent skill so it is hidden from the available skills list.
++   */
++  public disable<ThrowOnError extends boolean = false>(
++    parameters: {
++      name: string
++      directory?: string
++      workspace?: string
++    },
++    options?: Options<never, ThrowOnError>,
++  ) {
++    const params = buildClientParams(
++      [parameters],
++      [
++        {
++          args: [
++            { in: "path", key: "name" },
++            { in: "query", key: "directory" },
++            { in: "query", key: "workspace" },
++          ],
++        },
++      ],
++    )
++    return (options?.client ?? this.client).post<SkillDisableResponses, SkillDisableErrors, ThrowOnError>({
++      url: "/skill/{name}/disable",
++      ...options,
++      ...params,
++    })
++  }
++}
++
+ export class Project extends HeyApiClient {
+   /**
+    * List all projects
+@@ -7167,6 +7269,11 @@ export class OpencodeClient extends HeyApiClient {
+     return (this._mcp ??= new Mcp({ client: this.client }))
+   }
+ 
++  private _skill?: Skill2
++  get skill(): Skill2 {
++    return (this._skill ??= new Skill2({ client: this.client }))
++  }
++
+   private _project?: Project
+   get project(): Project {
+     return (this._project ??= new Project({ client: this.client }))
+diff --git a/packages/sdk/js/src/v2/gen/types.gen.ts b/packages/sdk/js/src/v2/gen/types.gen.ts
+index f06c20c..c7cf98e 100644
+--- a/packages/sdk/js/src/v2/gen/types.gen.ts
++++ b/packages/sdk/js/src/v2/gen/types.gen.ts
+@@ -8705,6 +8705,96 @@ export type McpDisconnectResponses = {
+ 
+ export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
+ 
++export type SkillStatusData = {
++  body?: never
++  path?: never
++  query?: {
++    directory?: string
++    workspace?: string
++  }
++  url: "/skill/status"
++}
++
++export type SkillStatusErrors = {
++  /**
++   * Bad request
++   */
++  400: BadRequestError
++}
++
++export type SkillStatusError = SkillStatusErrors[keyof SkillStatusErrors]
++
++export type SkillStatusResponses = {
++  /**
++   * Skill enabled status
++   */
++  200: {
++    [key: string]: boolean
++  }
++}
++
++export type SkillStatusResponse = SkillStatusResponses[keyof SkillStatusResponses]
++
++export type SkillEnableData = {
++  body?: never
++  path: {
++    name: string
++  }
++  query?: {
++    directory?: string
++    workspace?: string
++  }
++  url: "/skill/{name}/enable"
++}
++
++export type SkillEnableErrors = {
++  /**
++   * Bad request
++   */
++  400: BadRequestError
++}
++
++export type SkillEnableError = SkillEnableErrors[keyof SkillEnableErrors]
++
++export type SkillEnableResponses = {
++  /**
++   * Skill enabled successfully
++   */
++  200: boolean
++}
++
++export type SkillEnableResponse = SkillEnableResponses[keyof SkillEnableResponses]
++
++export type SkillDisableData = {
++  body?: never
++  path: {
++    name: string
++  }
++  query?: {
++    directory?: string
++    workspace?: string
++  }
++  url: "/skill/{name}/disable"
++}
++
++export type SkillDisableErrors = {
++  /**
++   * Bad request
++   */
++  400: BadRequestError
++}
++
++export type SkillDisableError = SkillDisableErrors[keyof SkillDisableErrors]
++
++export type SkillDisableResponses = {
++  /**
++   * Skill disabled successfully
++   */
++  200: boolean
++}
++
++export type SkillDisableResponse = SkillDisableResponses[keyof SkillDisableResponses]
++
+ export type ProjectListData = {
+   body?: never
+   path?: never
+diff --git a/packages/tui/src/app.tsx b/packages/tui/src/app.tsx
+index 3f1da52..b5fe172 100644
+--- a/packages/tui/src/app.tsx
++++ b/packages/tui/src/app.tsx
+@@ -42,6 +42,7 @@ import { PermissionProvider } from "./context/permission"
+ import { DialogModel } from "./component/dialog-model"
+ import { useConnected } from "./component/use-connected"
+ import { DialogMcp } from "./component/dialog-mcp"
++import { DialogSkillToggle } from "./component/dialog-skill-toggle"
+ import { DialogStatus } from "./component/dialog-status"
+ import { DialogDebug } from "./component/dialog-debug"
+ import { DialogThemeList } from "./component/dialog-theme-list"
+@@ -112,6 +113,7 @@ const appBindingCommands = [
+   "model.cycle_favorite_reverse",
+   "agent.list",
+   "mcp.list",
++  "skill.list",
+   "agent.cycle",
+   "agent.cycle.reverse",
+   "variant.cycle",
+@@ -692,6 +694,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
+           dialog.replace(() => <DialogMcp />)
+         },
+       },
++      {
++        name: "skill.list",
++        title: "Toggle Skills",
++        category: "Agent",
++        slashName: "skill-toggle",
++        run: () => {
++          dialog.replace(() => <DialogSkillToggle />)
++        },
++      },
+       {
+         name: "agent.cycle",
+         title: "Agent cycle",
+diff --git a/packages/tui/src/component/dialog-mcp.tsx b/packages/tui/src/component/dialog-mcp.tsx
+index c48c0f8..a0d38e6 100644
+--- a/packages/tui/src/component/dialog-mcp.tsx
++++ b/packages/tui/src/component/dialog-mcp.tsx
+@@ -3,19 +3,20 @@ import { useLocal } from "../context/local"
+ import { useSync } from "../context/sync"
+ import { map, pipe, entries, sortBy } from "remeda"
+ import { DialogSelect, type DialogSelectRef, type DialogSelectOption } from "../ui/dialog-select"
+-import { useTheme } from "../context/theme"
++import { useTheme, selectedForeground } from "../context/theme"
+ import { TextAttributes } from "@opentui/core"
+ import { useSDK } from "../context/sdk"
+ 
+-function Status(props: { enabled: boolean; loading: boolean }) {
++function Status(props: { enabled: boolean; loading: boolean; active: boolean }) {
+   const { theme } = useTheme()
++  const fg = selectedForeground(theme)
+   if (props.loading) {
+-    return <span style={{ fg: theme.textMuted }}>⋯ Loading</span>
++    return <span style={{ fg: props.active ? fg : theme.textMuted }}>⋯ Loading</span>
+   }
+   if (props.enabled) {
+-    return <span style={{ fg: theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
++    return <span style={{ fg: props.active ? fg : theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
+   }
+-  return <span style={{ fg: theme.textMuted }}>○ Disabled</span>
++  return <span style={{ fg: props.active ? fg : theme.textMuted }}>○ Disabled</span>
+ }
+ 
+ export function DialogMcp() {
+@@ -24,11 +25,13 @@ export function DialogMcp() {
+   const sdk = useSDK()
+   const [, setRef] = createSignal<DialogSelectRef<unknown>>()
+   const [loading, setLoading] = createSignal<string | null>(null)
++  const [active, setActive] = createSignal<string>()
+ 
+   const options = createMemo(() => {
+     // Track sync data and loading state to trigger re-render when they change
+     const mcpData = sync.data.mcp
+     const loadingMcp = loading()
++    const activeMcp = active()
+ 
+     return pipe(
+       mcpData ?? {},
+@@ -38,7 +41,9 @@ export function DialogMcp() {
+         value: name,
+         title: name,
+         description: status.status === "failed" ? "failed" : status.status,
+-        footer: <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp === name} />,
++        footer: (
++          <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp === name} active={activeMcp === name} />
++        ),
+         category: undefined,
+       })),
+     )
+@@ -77,6 +82,7 @@ export function DialogMcp() {
+       title="MCPs"
+       options={options()}
+       actions={actions()}
++      onMove={(option) => setActive(option.value)}
+       onSelect={(_option) => {
+         // Don't close on select, only on escape
+       }}
+diff --git a/packages/tui/src/component/dialog-skill-toggle.tsx b/packages/tui/src/component/dialog-skill-toggle.tsx
+new file mode 100644
+index 0000000..9fc43e2
+--- /dev/null
++++ b/packages/tui/src/component/dialog-skill-toggle.tsx
+@@ -0,0 +1,89 @@
++import { createMemo, createSignal } from "solid-js"
++import { useLocal } from "../context/local"
++import { useSync } from "../context/sync"
++import { map, pipe, entries, sortBy } from "remeda"
++import { DialogSelect, type DialogSelectRef, type DialogSelectOption } from "../ui/dialog-select"
++import { useTheme, selectedForeground } from "../context/theme"
++import { TextAttributes } from "@opentui/core"
++import { useSDK } from "../context/sdk"
++
++function Status(props: { enabled: boolean; loading: boolean; active: boolean }) {
++  const { theme } = useTheme()
++  const fg = selectedForeground(theme)
++  if (props.loading) {
++    return <span style={{ fg: props.active ? fg : theme.textMuted }}>⋯ Loading</span>
++  }
++  if (props.enabled) {
++    return <span style={{ fg: props.active ? fg : theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
++  }
++  return <span style={{ fg: props.active ? fg : theme.textMuted }}>○ Disabled</span>
++}
++
++export function DialogSkillToggle() {
++  const local = useLocal()
++  const sync = useSync()
++  const sdk = useSDK()
++  const [, setRef] = createSignal<DialogSelectRef<unknown>>()
++  const [loading, setLoading] = createSignal<string | null>(null)
++  const [active, setActive] = createSignal<string>()
++
++  const options = createMemo(() => {
++    const skillData = sync.data.skill
++    const loadingSkill = loading()
++    const activeSkill = active()
++
++    return pipe(
++      skillData ?? {},
++      entries(),
++      sortBy(([name]) => name),
++      map(([name, enabled]) => ({
++        value: name,
++        title: name,
++        description: enabled ? "active" : "inactive",
++        footer: (
++          <Status enabled={local.skill.isEnabled(name)} loading={loadingSkill === name} active={activeSkill === name} />
++        ),
++        category: undefined,
++      })),
++    )
++  })
++
++  const actions = createMemo(() => [
++    {
++      command: "dialog.skill.toggle",
++      title: "toggle",
++      onTrigger: async (option: DialogSelectOption<string>) => {
++        if (loading() !== null) return
++
++        setLoading(option.value)
++        try {
++          await local.skill.toggle(option.value)
++          // Refresh skill status from server
++          const status = await sdk.client.skill.status()
++          if (status.data) {
++            sync.set("skill", status.data)
++          } else {
++            console.error("Failed to refresh skill status: no data returned")
++          }
++        } catch (error) {
++          console.error("Failed to toggle skill:", error)
++        } finally {
++          setLoading(null)
++        }
++      },
++    },
++  ])
++
++  return (
++    <DialogSelect
++      ref={setRef}
++      title="Skills"
++      options={options()}
++      actions={actions()}
++      onMove={(option) => setActive(option.value)}
++      onSelect={(_option) => {
++        // Don't close on select, only on escape
++      }}
++    />
++  )
++}
+\ No newline at end of file
+diff --git a/packages/tui/src/component/dialog-status.tsx b/packages/tui/src/component/dialog-status.tsx
+index 6c8fabd..3471175 100644
+--- a/packages/tui/src/component/dialog-status.tsx
++++ b/packages/tui/src/component/dialog-status.tsx
+@@ -118,6 +118,29 @@ export function DialogStatus() {
+           </For>
+         </box>
+       )}
++      <Show when={Object.keys(sync.data.skill).length > 0} fallback={<text fg={theme.text}>No Skills</text>}>
++        <box>
++          <text fg={theme.text}>{Object.values(sync.data.skill).filter((enabled) => enabled).length} Skills</text>
++          <For each={Object.entries(sync.data.skill)}>
++            {([key, enabled]) => (
++              <box flexDirection="row" gap={1}>
++                <text
++                  flexShrink={0}
++                  style={{
++                    fg: enabled ? theme.success : theme.textMuted,
++                  }}
++                >
++                  •
++                </text>
++                <text fg={theme.text} wrapMode="word">
++                  <b>{key}</b>
++                  <span style={{ fg: theme.textMuted }}>{enabled ? " enabled" : " disabled"}</span>
++                </text>
++              </box>
++            )}
++          </For>
++        </box>
++      </Show>
+       <Show when={enabledFormatters().length > 0} fallback={<text fg={theme.text}>No Formatters</text>}>
+         <box>
+           <text fg={theme.text}>{enabledFormatters().length} Formatters</text>
+diff --git a/packages/tui/src/config/keybind.ts b/packages/tui/src/config/keybind.ts
+index 5dd7e4b..8097468 100644
+--- a/packages/tui/src/config/keybind.ts
++++ b/packages/tui/src/config/keybind.ts
+@@ -124,6 +124,7 @@ export const Definitions = {
+   model_cycle_favorite: keybind("none", "Next favorite model"),
+   model_cycle_favorite_reverse: keybind("none", "Previous favorite model"),
+   mcp_list: keybind("none", "List MCP servers"),
++  skill_list: keybind("none", "List skills"),
+   provider_connect: keybind("none", "Connect provider"),
+   console_org_switch: keybind("none", "Switch console organization"),
+   agent_list: keybind("<leader>a", "List agents"),
+@@ -208,6 +209,7 @@ export const Definitions = {
+   "dialog.select.submit": keybind("return", "Submit selected dialog item"),
+   "dialog.prompt.submit": keybind("return", "Submit dialog prompt"),
+   "dialog.mcp.toggle": keybind("space", "Toggle MCP in MCP dialog"),
++  "dialog.skill.toggle": keybind("space", "Toggle skill in skill dialog"),
+   "dialog.move_session.new": keybind("ctrl+m", "New project copy"),
+   "dialog.move_session.delete": keybind("ctrl+d", "Delete project copy"),
+   "dialog.move_session.refresh": keybind("ctrl+r", "Refresh project copies"),
+@@ -330,6 +332,7 @@ export const CommandMap = {
+   model_cycle_favorite: "model.cycle_favorite",
+   model_cycle_favorite_reverse: "model.cycle_favorite_reverse",
+   mcp_list: "mcp.list",
++  skill_list: "skill.list",
+   provider_connect: "provider.connect",
+   console_org_switch: "console.org.switch",
+   agent_list: "agent.list",
+diff --git a/packages/tui/src/context/local.tsx b/packages/tui/src/context/local.tsx
+index a05d315..3f68fd6 100644
+--- a/packages/tui/src/context/local.tsx
++++ b/packages/tui/src/context/local.tsx
+@@ -519,6 +519,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+       },
+     }
+ 
++    const skill = {
++      isEnabled(name: string) {
++        return sync.data.skill[name] !== false
++      },
++      async toggle(name: string) {
++        const enabled = sync.data.skill[name] !== false
++        if (enabled) {
++          await sdk.client.skill.disable({ name })
++          sync.set("skill", name, false)
++        } else {
++          await sdk.client.skill.enable({ name })
++          sync.set("skill", name, true)
++        }
++      },
++    }
++
+     createEffect(() => {
+       const value = agent.current()
+       if (!value?.model) return
+@@ -534,6 +550,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+       model,
+       agent,
+       mcp,
++      skill,
+       session,
+       permission,
+     }
+diff --git a/packages/tui/src/context/sync.tsx b/packages/tui/src/context/sync.tsx
+index 71e050d..59732c5 100644
+--- a/packages/tui/src/context/sync.tsx
++++ b/packages/tui/src/context/sync.tsx
+@@ -109,6 +109,9 @@ export const {
+       mcp_resource: {
+         [key: string]: McpResource
+       }
++      skill: {
++        [key: string]: boolean
++      }
+       formatter: FormatterStatus[]
+       vcs: VcsInfo | undefined
+     }>({
+@@ -139,6 +142,7 @@ export const {
+       lsp: [],
+       mcp: {},
+       mcp_resource: {},
++      skill: {},
+       formatter: [],
+       vcs: undefined,
+     })
+@@ -523,6 +527,7 @@ export const {
+             sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
+             sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),
+             sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {}))),
++            sdk.client.skill.status({ workspace }).then((x) => setStore("skill", reconcile(x.data ?? {}))),
+             sdk.client.experimental.resource
+               .list({ workspace })
+               .then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
+diff --git a/packages/tui/src/routes/session/footer.tsx b/packages/tui/src/routes/session/footer.tsx
+index c3a9625..e6b6bdf 100644
+--- a/packages/tui/src/routes/session/footer.tsx
++++ b/packages/tui/src/routes/session/footer.tsx
+@@ -12,6 +12,7 @@ export function Footer() {
+   const route = useRoute()
+   const mcp = createMemo(() => Object.values(sync.data.mcp).filter((x) => x.status === "connected").length)
+   const mcpError = createMemo(() => Object.values(sync.data.mcp).some((x) => x.status === "failed"))
++  const skill = createMemo(() => Object.values(sync.data.skill).filter((enabled) => enabled).length)
+   const lsp = createMemo(() => Object.keys(sync.data.lsp))
+   const permissions = createMemo(() => {
+     if (route.data.type !== "session") return []
+@@ -82,6 +83,12 @@ export function Footer() {
+                 {mcp()} MCP
+               </text>
+             </Show>
++            <Show when={skill()}>
++              <text fg={theme.text}>
++                <span style={{ fg: theme.success }}>▸ </span>
++                {skill()} skills
++              </text>
++            </Show>
+             <text fg={theme.textMuted}>/status</text>
+           </Match>
+         </Switch>

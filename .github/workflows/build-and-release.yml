@@ -1,0 +1,147 @@
+name: Build and publish skill-toggle binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_version:
+        description: "opencode version tag to build (default: latest)"
+        required: false
+        default: "latest"
+      force:
+        description: "Force rebuild even if the version was already published"
+        required: false
+        default: "false"
+        type: boolean
+  schedule:
+    - cron: "30 4 * * *"
+  push:
+    branches: [main]
+    paths: ["patches/**", ".github/workflows/build-and-release.yml"]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      published: ${{ steps.resolve.outputs.published }}
+    steps:
+      - name: Resolve version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ inputs.upstream_version }}" != "" ] && [ "${{ inputs.upstream_version }}" != "latest" ]; then
+            V="${{ inputs.upstream_version }}"
+          else
+            V="$(gh api repos/anomalyco/opencode/releases/latest --jq .tag_name | sed 's/^v//')"
+          fi
+          PUBLISHED="$(gh release view "toggle-$V" --json tagName --jq .tagName 2>/dev/null || echo '')"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: detect
+    if: ${{ (github.event.inputs.force == 'true') || (needs.detect.outputs.published == '') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repo (for patches)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          version: latest
+
+      - name: Clone opencode at target version
+        run: |
+          git clone --depth 1 --branch "${{ needs.detect.outputs.tag }}" \
+            https://github.com/anomalyco/opencode.git /tmp/opencode-src
+
+      - name: Apply patches
+        run: |
+          cd /tmp/opencode-src
+          for p in "$GITHUB_WORKSPACE"/patches/*.patch; do
+            echo ">> Applying $p"
+            if ! git apply --3way "$p"; then
+              gh issue create \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "Patches need update for ${{ needs.detect.outputs.tag }}" \
+                --body "git apply --3way failed for \`$p\` on opencode \`${{ needs.detect.outputs.tag }}\`. Update the patch or adapt it."
+              echo "::error::patch apply failed for $p on ${{ needs.detect.outputs.tag }}"
+              exit 1
+            fi
+          done
+
+      - name: Install dependencies
+        working-directory: /tmp/opencode-src
+        run: bun install --frozen-lockfile
+
+      - name: Build opencode
+        working-directory: /tmp/opencode-src/packages/opencode
+        env:
+          OPENCODE_CHANNEL: latest
+          OPENCODE_VERSION: ${{ needs.detect.outputs.version }}
+          SPLIT: "0"
+        run: bun run build --single --skip-embed-web-ui
+
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.detect.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          BIN="/tmp/opencode-src/packages/opencode/dist/opencode-linux-x64/bin/opencode"
+          ASSET="opencode-${VERSION}-toggle-${PLATFORM}"
+          cp "$BIN" "$RUNNER_TEMP/$ASSET"
+          if gh release view "toggle-$VERSION" --json tagName >/dev/null 2>&1; then
+            gh release upload "toggle-$VERSION" "$RUNNER_TEMP/$ASSET" --clobber
+          else
+            gh release create "toggle-$VERSION" "$RUNNER_TEMP/$ASSET" \
+              --title "opencode $VERSION + skill-toggle" \
+              --notes "Build custom de opencode **$VERSION** con el toggle de skills persistente.
+
+Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\`"
+          fi
+
+      - name: Publish rolling "latest" assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          BIN="/tmp/opencode-src/packages/opencode/dist/opencode-linux-x64/bin/opencode"
+          LATEST_ASSET="opencode-${PLATFORM}"
+          cp "$BIN" "$RUNNER_TEMP/$LATEST_ASSET"
+          if gh release view latest --json tagName >/dev/null 2>&1; then
+            gh release upload latest "$RUNNER_TEMP/$LATEST_ASSET" --clobber
+          else
+            gh release create latest "$RUNNER_TEMP/$LATEST_ASSET" \
+              --title "latest" \
+              --notes "Binarios de la última versión compilada con skill-toggle. Descarga \`opencode-<platform>\`."
+          fi
+
+      - name: Copiar install.sh al release latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view latest --json tagName >/dev/null 2>&1; then
+            gh release upload latest "$GITHUB_WORKSPACE/install.sh" --clobber --clobber
+          else
+            gh release create latest "$GITHUB_WORKSPACE/install.sh" \
+              --title "latest" --notes "instalador"
+          fi

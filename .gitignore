@@ -1,0 +1,4 @@
+dist/
+.opencode-*-download
+*.log
+/tmp/
