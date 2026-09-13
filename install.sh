@@ -11,7 +11,7 @@
 # se usa primero; si no, se descarga del release "latest" del repo.
 set -euo pipefail
 
-GH_REPO="${GH_REPO:-benjametalsp/opencode-skill-toggle}"
+GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
 ORIG="$HOME/.opencode/bin/opencode"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

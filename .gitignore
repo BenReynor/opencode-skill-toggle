@@ -1,4 +1,5 @@
 dist/
 .opencode-*-download
 *.log
-/tmp/
+/tmp/autenticacion.txt
+autenticacion.txt

@@ -20,7 +20,7 @@ También incluye el fix de compilación local (`splitting` configurable) necesar
 Descarga e instala desde los Releases de este repo:
 
 ```bash
-curl -sL https://github.com/TU_USUARIO/opencode-skill-toggle/releases/latest/download/install.sh | bash
+curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/latest/download/install.sh | bash
 ```
 
 o manualmente:
