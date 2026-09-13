@@ -53,7 +53,8 @@ Reinicia opencode. Usa el diálogo `/skill-toggle` (o `/mcp`) para activar/desac
 Requisitos: [bun](https://bun.sh) (≥1.2).
 
 ```bash
-./build.sh              # compila la última versión publicada
+./build.sh              # compila la versión anclada que valida el toggle (v1.18.30)
+./build.sh latest       # compila la última versión publicada (puede requerir actualizar patches)
 ./build.sh 1.18.30      # compila una versión concreta
 ```
 

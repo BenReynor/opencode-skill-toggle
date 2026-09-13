@@ -3,20 +3,23 @@
 # Compila opencode + skill-toggle desde el fuente de upstream.
 #
 # Uso:
-#   ./build.sh                 # compila la versión more reciente (latest)
+#   ./build.sh                 # compila la versión anclada (1.18.30, la validada)
+#   ./build.sh latest          # compila la última versión de upstream (requiere actualizar patches)
 #   ./build.sh 1.18.30         # compila una versión específica
 #   MINIFY=0 ./build.sh        # sin minificar (solo debugging)
 #
 set -euo pipefail
 
-VERSION="${1:-latest}"
+VERSION="${1:-1.18.30}"
 WORK="/tmp/opencode-toggle-build"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 resolve_tag() {
   if [[ "$VERSION" == "latest" ]]; then
+    echo ">> ATENCION: 'latest' puede requerir actualizar los patches." >&2
+    echo ">>           los patches estan validados para 1.18.30." >&2
     git ls-remote --tags --refs https://github.com/anomalyco/opencode.git | \
-      awk -F'/' '{print $3}' | sed 's/^v//' | sort -V | tail -1
+      awk -F'/' '{print $3}' | grep -E '^v[0-9]' | sed 's/^v//' | sort -V | tail -1
   else
     echo "$VERSION"
   fi
@@ -42,6 +45,10 @@ git -C "$WORK" checkout --force "$TAG"
 git -C "$WORK" checkout --force --detach 2>/dev/null || true
 
 echo ">> Aplicando patches (los fallos de 3way se pueden arreglar a mano)..."
+rm -f \
+  "$WORK/packages/opencode/src/server/routes/instance/httpapi/groups/skill.ts" \
+  "$WORK/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts" \
+  "$WORK/packages/tui/src/component/dialog-skill-toggle.tsx"
 git -C "$WORK" apply --3way "$SCRIPT_DIR/patches/00-skill-toggle.patch"
 git -C "$WORK" apply --3way "$SCRIPT_DIR/patches/01-build-local-fix.patch"
 

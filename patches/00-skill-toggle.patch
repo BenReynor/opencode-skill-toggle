@@ -289,11 +289,53 @@ index a2bcd42..7c87448 100644
    ModelRef,
    MoveSessionDestination,
    OutputFormat,
-@@ -2527,6 +2533,102 @@ export class Mcp extends HeyApiClient {
-   }
- }
- 
-+export class Skill2 extends HeyApiClient {
+@@ -6525,27 +6525,121 @@ export class Skill extends HeyApiClient {
+-export class Skill extends HeyApiClient {
+-  /**
+-   * List skills
+-   *
+-   * Retrieve currently registered skills.
+-   */
+-  public list<ThrowOnError extends boolean = false>(
+-    parameters?: {
+-      location?: {
+-        directory?: string
+-        workspace?: string
+-      }
+-    },
+-    options?: Options<never, ThrowOnError>,
+-  ) {
+-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+-    return (options?.client ?? this.client).get<V2SkillListResponses, V2SkillListErrors, ThrowOnError>({
+-      url: "/api/skill",
+-      ...options,
+-      ...params,
+-    })
+-  }
+-}
++export class Skill extends HeyApiClient {
++  /**
++   * List skills
++   *
++   * Retrieve currently registered skills.
++   */
++  public list<ThrowOnError extends boolean = false>(
++    parameters?: {
++      location?: {
++        directory?: string
++        workspace?: string
++      }
++    },
++    options?: Options<never, ThrowOnError>,
++  ) {
++    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
++    return (options?.client ?? this.client).get<V2SkillListResponses, V2SkillListErrors, ThrowOnError>({
++      url: "/api/skill",
++      ...options,
++      ...params,
++    })
++  }
++
 +  /**
 +   * Get skill status
 +   *
@@ -388,17 +430,17 @@ index a2bcd42..7c87448 100644
 +    })
 +  }
 +}
-+
- export class Project extends HeyApiClient {
+ 
+ export class Event2 extends HeyApiClient {
    /**
-    * List all projects
-@@ -7167,6 +7269,11 @@ export class OpencodeClient extends HeyApiClient {
+    * Subscribe to events
+@@ -7167,6 +7267,11 @@ export class OpencodeClient extends HeyApiClient {
      return (this._mcp ??= new Mcp({ client: this.client }))
    }
  
-+  private _skill?: Skill2
-+  get skill(): Skill2 {
-+    return (this._skill ??= new Skill2({ client: this.client }))
++  private _skill?: Skill
++  get skill(): Skill {
++    return (this._skill ??= new Skill({ client: this.client }))
 +  }
 +
    private _project?: Project
