@@ -25,7 +25,7 @@ resolve_tag() {
     echo ">> ATENCION: 'latest' puede requerir actualizar los patches." >&2
     echo ">>           los patches estan validados para 1.18.30." >&2
     # Obtener la última tag publicada vía el tarball (sin git)
-    curl -fsSL "https://api.github.com/repos/anomalyco/opencode/tags" \
+    curl -fsSL --proto =https --tlsv1.2 "https://api.github.com/repos/anomalyco/opencode/tags" \
       | grep -oE '"name": *"v[0-9][^"]*"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/\1/'
   else
     echo "$VERSION"
@@ -48,7 +48,7 @@ elif [[ -d "$SRC" ]]; then
 else
   echo ">> Descargando opencode $VER..."
   mkdir -p "$WORK/src"
-  curl -fsSL "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/$TAG" \
+  curl -fsSL --proto =https --tlsv1.2 "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/$TAG" \
     -o "$WORK/src/opencode-$VER.tar.gz"
   tar -xzf "$WORK/src/opencode-$VER.tar.gz" -C "$WORK/src"
   rm -f "$WORK/src/opencode-$VER.tar.gz"

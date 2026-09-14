@@ -57,6 +57,34 @@ if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
   Invoke-WebRequest -Uri $Url -OutFile $Tmp -UseBasicParsing
 }
 
+# --- Verificación SHA256 ----------------------------------------------------
+$ShaUrl = "https://github.com/$Repo/releases/latest/download/SHA256SUMS"
+$ShaTmp = Join-Path $BinDir "opencode-sha256.download"
+Write-Step "Verificando SHA256 contra $ShaUrl"
+try {
+  if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+    & curl.exe -fsSL $ShaUrl -o $ShaTmp
+    if ($LASTEXITCODE -ne 0) { throw "curl no pudo descargar $ShaUrl (exit $LASTEXITCODE)" }
+  } else {
+    Invoke-WebRequest -Uri $ShaUrl -OutFile $ShaTmp -UseBasicParsing
+  }
+  # El formato de SHA256SUMS es "<hash>  opencode-<platform>"
+  $ExpectedLine = Get-Content $ShaTmp | Where-Object { $_ -match "(?i)opencode-$Platform\s*$" } | Select-Object -First 1
+  if (-not $ExpectedLine) {
+    Write-Warning "No hay checksum para opencode-$Platform; se continúa sin verificar."
+  } else {
+    $Expected = ($ExpectedLine -split '\s+')[0]
+    $Actual = (Get-FileHash -Path $Tmp -Algorithm SHA256).Hash.ToLower()
+    if ($Actual -ne $Expected.ToLower()) {
+      Remove-Item -Force $Tmp, $ShaTmp -ErrorAction SilentlyContinue
+      throw "Verificación SHA256 falló para opencode-$Platform. Esperado: $Expected. Obtenido: $Actual. El binario se descartó por posible manipulación."
+    }
+    Write-Step "SHA256 verificado correctamente"
+  }
+} finally {
+  if (Test-Path $ShaTmp) { Remove-Item -Force $ShaTmp }
+}
+
 # --- Backup del binario actual ----------------------------------------------
 if (Test-Path $Final) {
   $Backup = "$Final.bak"
@@ -76,6 +104,7 @@ Write-Host ""
 Write-Host @"
 Aviso importante:
   - Esta es una build personalizada (no oficial). Mantiene tu opencode.db real.
+  - Al descargar de GitHub Releases, el binario se verifica contra SHA256SUMS.
   - Configura "autoupdate": false en opencode.json para que no la reemplace
     el instalador oficial.
   - Al ser un binario sin firma, Windows SmartScreen puede mostrarte un aviso

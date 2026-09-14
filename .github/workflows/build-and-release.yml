@@ -54,12 +54,12 @@ jobs:
       VERSION: ${{ needs.detect.outputs.version }}
     steps:
       - name: Checkout repo (for patches)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
       - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           version: latest
 
@@ -95,10 +95,12 @@ jobs:
           SPLIT: "0"
         run: bun run build --skip-embed-web-ui
 
-      - name: Publish versioned release
+      - name: Publish versioned release (+ SHA256SUMS)
         run: |
           # Binarios que publicamos (el build produce 12 variantes; elegimos las habituales)
           PLATFORMS="linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl linux-x64-baseline darwin-x64 darwin-arm64 windows-x64"
+          DEST="$RUNNER_TEMP/versioned"
+          mkdir -p "$DEST"
           cd /tmp/opencode-src/packages/opencode/dist
           ASSETS=()
           for PLATFORM in $PLATFORMS; do
@@ -108,9 +110,12 @@ jobs:
               exit 1
             fi
             ASSET="opencode-${VERSION}-toggle-${PLATFORM}"
-            cp "$BIN" "$RUNNER_TEMP/$ASSET"
-            ASSETS+=("$RUNNER_TEMP/$ASSET")
+            cp "$BIN" "$DEST/$ASSET"
+            ASSETS+=("$DEST/$ASSET")
           done
+          cd "$DEST"
+          sha256sum opencode-* > SHA256SUMS
+          ASSETS+=("$DEST/SHA256SUMS")
           if gh release view "toggle-$VERSION" --json tagName >/dev/null 2>&1; then
             gh release upload "toggle-$VERSION" "${ASSETS[@]}" --clobber
           else
@@ -118,12 +123,14 @@ jobs:
               --title "opencode $VERSION + skill-toggle" \
               --notes "Build custom de opencode **$VERSION** con el toggle de skills persistente.
 
-              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows)."
+              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows). Verifica el SHA256 de tu binario con SHA256SUMS."
           fi
 
-      - name: Publish rolling "latest" assets
+      - name: Publish rolling "latest" assets (+ SHA256SUMS)
         run: |
           PLATFORMS="linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl linux-x64-baseline darwin-x64 darwin-arm64 windows-x64"
+          DEST="$RUNNER_TEMP/latest"
+          mkdir -p "$DEST"
           cd /tmp/opencode-src/packages/opencode/dist
           ASSETS=()
           for PLATFORM in $PLATFORMS; do
@@ -133,12 +140,18 @@ jobs:
               exit 1
             fi
             ASSET="opencode-${PLATFORM}"
-            cp "$BIN" "$RUNNER_TEMP/$ASSET"
-            ASSETS+=("$RUNNER_TEMP/$ASSET")
+            cp "$BIN" "$DEST/$ASSET"
+            ASSETS+=("$DEST/$ASSET")
           done
-          gh release upload latest "${ASSETS[@]}" --clobber || \
+          cd "$DEST"
+          sha256sum opencode-* > SHA256SUMS
+          ASSETS+=("$DEST/SHA256SUMS")
+          if gh release view latest --json tagName >/dev/null 2>&1; then
+            gh release upload latest "${ASSETS[@]}" --clobber
+          else
             gh release create latest "${ASSETS[@]}" --title "latest" \
-              --notes "Binarios de la última versión compilada con skill-toggle. Descarga \`opencode-<platform>\`."
+              --notes "Binarios de la última versión compilada con skill-toggle. Descarga \`opencode-<platform>\` y verifica con SHA256SUMS."
+          fi
 
       - name: Copiar installers al release latest
         run: |

@@ -48,7 +48,36 @@ if [[ -z "$BIN_SRC" ]]; then
   URL="https://github.com/$GH_REPO/releases/latest/download/opencode-$PLATFORM"
   echo ">> Descargando: $URL"
   BIN_SRC="$SCRIPT_DIR/.opencode-$PLATFORM.download"
-  curl -fsSL "$URL" -o "$BIN_SRC"
+  curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$BIN_SRC"
+
+  # --- Verificación SHA256 ---------------------------------------------------
+  SHA_URL="https://github.com/$GH_REPO/releases/latest/download/SHA256SUMS"
+  SHA_FILE="$SCRIPT_DIR/.opencode-sha256.download"
+  echo ">> Verificando SHA256 contra $SHA_URL"
+  if curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_FILE"; then
+    EXPECTED="$(awk -v a="opencode-$PLATFORM" '$2==a {print $1; exit}' "$SHA_FILE")"
+    if [[ -z "$EXPECTED" ]]; then
+      echo ">> aviso: no hay checksum para opencode-$PLATFORM; se continúa sin verificar" >&2
+    else
+      if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL="$(sha256sum "$BIN_SRC" | awk '{print $1}')"
+      else
+        ACTUAL="$(shasum -a 256 "$BIN_SRC" | awk '{print $1}')"
+      fi
+      if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+        echo "ERROR: la verificación SHA256 falló para opencode-$PLATFORM" >&2
+        echo "  esperado: $EXPECTED" >&2
+        echo "  obtenido: $ACTUAL" >&2
+        rm -f "$BIN_SRC" "$SHA_FILE"
+        echo "  El binario se descartó por posible manipulación." >&2
+        exit 1
+      fi
+      echo ">> SHA256 verificado correctamente"
+    fi
+  else
+    echo ">> aviso: no se pudo descargar SHA256SUMS; se continúa sin verificar" >&2
+  fi
+  rm -f "$SHA_FILE"
 fi
 
 # --- Backup del binario actual ----------------------------------------------
@@ -70,6 +99,7 @@ echo
 cat <<'EOF'
 Aviso importante:
   - Esta es una build personalizada (no oficial). Mantiene tu opencode.db real.
+  - Al descargar de GitHub Releases, el binario se verifica contra SHA256SUMS.
   - Configura "autoupdate": false en opencode.json para que no la reemplace
     el instalador oficial.
   - Reinicia opencode para que el binario nuevo quede activo.
