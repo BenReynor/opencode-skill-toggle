@@ -106,7 +106,7 @@ jobs:
           VERSION: ${{ needs.detect.outputs.version }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          BIN="/tmp/opencode-src/packages/opencode/dist/opencode-linux-x64/bin/opencode"
+          BIN="$(find /tmp/opencode-src/packages/opencode/dist -type f -path '*/bin/opencode' | head -1)"
           ASSET="opencode-${VERSION}-toggle-${PLATFORM}"
           cp "$BIN" "$RUNNER_TEMP/$ASSET"
           if gh release view "toggle-$VERSION" --json tagName >/dev/null 2>&1; then
@@ -124,7 +124,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          BIN="/tmp/opencode-src/packages/opencode/dist/opencode-linux-x64/bin/opencode"
+          BIN="$(find /tmp/opencode-src/packages/opencode/dist -type f -path '*/bin/opencode' | head -1)"
           LATEST_ASSET="opencode-${PLATFORM}"
           cp "$BIN" "$RUNNER_TEMP/$LATEST_ASSET"
           if gh release view latest --json tagName >/dev/null 2>&1; then
