@@ -104,7 +104,7 @@ jobs:
           cd /tmp/opencode-src/packages/opencode/dist
           ASSETS=()
           for PLATFORM in $PLATFORMS; do
-            BIN="$(find "$PLATFORM/bin" -maxdepth 1 -type f \( -name 'opencode' -o -name 'opencode.exe' \) | head -1)"
+            BIN="$(find "opencode-$PLATFORM/bin" -maxdepth 1 -type f \( -name 'opencode' -o -name 'opencode.exe' \) | head -1)"
             if [ -z "$BIN" ]; then
               echo "::error::no binary found for $PLATFORM"
               exit 1
@@ -134,7 +134,7 @@ jobs:
           cd /tmp/opencode-src/packages/opencode/dist
           ASSETS=()
           for PLATFORM in $PLATFORMS; do
-            BIN="$(find "$PLATFORM/bin" -maxdepth 1 -type f \( -name 'opencode' -o -name 'opencode.exe' \) | head -1)"
+            BIN="$(find "opencode-$PLATFORM/bin" -maxdepth 1 -type f \( -name 'opencode' -o -name 'opencode.exe' \) | head -1)"
             if [ -z "$BIN" ]; then
               echo "::error::no binary found for $PLATFORM"
               exit 1
