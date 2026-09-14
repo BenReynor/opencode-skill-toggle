@@ -45,13 +45,13 @@ for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PL
   fi
 done
 if [[ -z "$BIN_SRC" ]]; then
-  URL="https://github.com/$GH_REPO/releases/latest/download/opencode-$PLATFORM"
+  URL="https://github.com/$GH_REPO/releases/download/latest/opencode-$PLATFORM"
   echo ">> Descargando: $URL"
   BIN_SRC="$SCRIPT_DIR/.opencode-$PLATFORM.download"
   curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$BIN_SRC"
 
   # --- Verificación SHA256 ---------------------------------------------------
-  SHA_URL="https://github.com/$GH_REPO/releases/latest/download/SHA256SUMS"
+  SHA_URL="https://github.com/$GH_REPO/releases/download/latest/SHA256SUMS"
   SHA_FILE="$SCRIPT_DIR/.opencode-sha256.download"
   echo ">> Verificando SHA256 contra $SHA_URL"
   if curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_FILE"; then

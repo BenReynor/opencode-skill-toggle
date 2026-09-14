@@ -3,7 +3,7 @@
   Instala opencode + skill-toggle (build personalizada del binario de opencode) en Windows.
 
   Uso:
-    powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/latest/download/install.ps1 | iex"
+    powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.ps1 | iex"
 
   Opcional:
     $env:GH_REPO = "tudusuario/opencode-skill-toggle"  antes de ejecutar.
@@ -44,7 +44,7 @@ Write-Step "Plataforma: $Platform"
 # --- Obtener el binario -----------------------------------------------------
 $BinDir = Join-Path $HOME ".opencode\bin"
 $Final = Join-Path $BinDir "opencode.exe"
-$Url = "https://github.com/$Repo/releases/latest/download/opencode-$Platform"
+$Url = "https://github.com/$Repo/releases/download/latest/opencode-$Platform"
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
@@ -58,7 +58,7 @@ if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
 }
 
 # --- Verificación SHA256 ----------------------------------------------------
-$ShaUrl = "https://github.com/$Repo/releases/latest/download/SHA256SUMS"
+$ShaUrl = "https://github.com/$Repo/releases/download/latest/SHA256SUMS"
 $ShaTmp = Join-Path $BinDir "opencode-sha256.download"
 Write-Step "Verificando SHA256 contra $ShaUrl"
 try {

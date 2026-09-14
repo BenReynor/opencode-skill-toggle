@@ -24,13 +24,13 @@ instaladas.
 **Linux / macOS**
 
 ```bash
-curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/latest/download/install.sh | bash
+curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.sh | bash
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/latest/download/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.ps1 | iex"
 ```
 
 Estos comandos descargan el binario adecuado a tu sistema, lo instalan y crean
