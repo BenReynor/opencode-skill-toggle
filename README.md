@@ -1,100 +1,93 @@
 # opencode-skill-toggle
 
-Build personalizada de **opencode** que añade un **toggle de skills real y persistente**.
+Una versión de **opencode** con un interruptor (toggle) para activar o
+desactivar **cada skill por separado**, y que recuerda tu elección.
 
-Con el toggle puedes tener instaladas todas las skills que quieras, pero **usar solo las que actives**: las deshabilitadas se quitan del prompt del sistema, la herramienta `skill()` las rechaza, y el estado sobrevive reinicios. Así evitas sobrecargar opencode — igual que el toggle de MCP, pero para skills.
+Mantienes instaladas todas las skills que quieras, pero solo se cargan las que
+tienes activadas: las desactivadas no aparecen en las sugerencias del modelo y
+se rechazan al pedirlas. Así evitas saturar opencode cuando tienes muchas skills
+instaladas.
 
-## Qué cambia vs opencode oficial
+## Qué hace
 
-| | Oficial | Este build |
+| | opencode oficial | Esta versión |
 |---|---|---|
-| Toggle en el diálogo (`/skill-toggle`) | no | sí |
-| Deshabilitada → fuera del system prompt | — | sí |
-| `skill()` rechaza deshabilitadas | — | sí (`NotFoundError`) |
-| Estado persistente (sobrevive reinicio) | — | sí (`~/.local/share/opencode/skills-toggle.json`) |
-
-También incluye el fix de compilación local (`splitting` configurable) necesario para generar binarios estables con bun.
+| Activar / desactivar una skill | — | ✓ |
+| La desactivada desaparece del entorno del modelo | — | ✓ |
+| Se rechaza si la pides desactivada | — | ✓ |
+| Recuerda tu elección entre reinicios | — | ✓ |
 
 ## Instalar
 
-Descarga e instala desde los Releases de este repo:
+### Con un solo comando
 
 ```bash
 curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/latest/download/install.sh | bash
 ```
 
-o manualmente:
+Este comando descarga adaptado a tu sistema, lo instala y crea una copia de
+seguridad de la instalación anterior por si quieres volver.
 
-```bash
-# 1. descarga el binario de tu plataforma desde releases/latest
-# 2. (opcional) guarda backup del actual
-cp ~/.opencode/bin/opencode ~/.opencode/bin/opencode.bak
-# 3. reemplaza
-cp opencode-linux-x64 ~/.opencode/bin/opencode
-chmod +x ~/.opencode/bin/opencode
+### Manual
+
+1. Ve a [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases)
+   y descarga el archivo que corresponda a tu sistema
+   (`opencode-linux-x64`, `opencode-linux-arm64`, `opencode-darwin-*`).
+2. Sustituye el binario existente de opencode por el descargado.
+3. Si lo deseas, guarda antes una copia del anterior con otro nombre.
+
+### Importante: desactiva la actualización automática
+
+Para que el instalador oficial de opencode no reemplace esta versión, añade
+esto a tu archivo de configuración (`opencode.json`):
+
+```json
+{
+  "autoupdate": false
+}
 ```
 
-> **Importante:** desactiva el autoupdate en tu config para que el instalador
-> oficial no reemplace este binario:
-> `"autoupdate": false` en `opencode.json`.
+Reinicia opencode cuando termines.
 
-Reinicia opencode. Usa el diálogo `/skill-toggle` (o `/mcp`) para activar/desactivar.
+## Cómo se usa
 
-## Uso del toggle
+Abre el diálogo de opencode y escribe:
 
-- Abre el diálogo `skill-toggle` desde la TUI.
-- `✓ Enabled` / `○ Disabled`.
-- Las deshabilitadas desaparecen del `available_skills` del modelo y `skill()`
-  responde: _«Skill not found. Available skills: ...»_.
-- El estado se guarda en `~/.local/share/opencode/skills-toggle.json`.
-
-## Compilar desde fuente
-
-Requisitos: [bun](https://bun.sh) (≥1.2).
-
-```bash
-./build.sh              # compila la versión anclada que valida el toggle (v1.18.30)
-./build.sh latest       # compila la última versión publicada (puede requerir actualizar patches)
-./build.sh 1.18.30      # compila una versión concreta
+```
+/skill-toggle
 ```
 
-El binario queda en `dist/opencode-linux-x64` (y una copia `opencode-<version>-toggle-linux-x64`).
+Selecciona la skill que quieras y actívala o desactívala:
 
-### Compilar a mano
+- `✓ Enabled` — la skill está activa.
+- `○ Disabled` — la skill está desactivada (no se carga ni se puede pedir).
 
-```bash
-git clone https://github.com/anomalyco/opencode.git /tmp/opencode-src
-cd /tmp/opencode-src
-git checkout v1.18.30
-git apply /ruta/a/patches/00-skill-toggle.patch  # el toggle
-git apply /ruta/a/patches/01-build-local-fix.patch # fix de build
-bun install --frozen-lockfile
-cd packages/opencode
-OPENCODE_CHANNEL=latest OPENCODE_VERSION=1.18.30 SPLIT=0 \
-  bun run build --single --skip-embed-web-ui
-```
+Tu elección se guarda en disco y se mantiene al reiniciar opencode.
 
-El binario sale en `dist/opencode-linux-x64/bin/opencode`.
+## Preguntas frecuentes
 
-## Releases automáticos (CI)
+- **¿Pierdo mis conversaciones o ajustes?** No. Esta versión usa la misma base
+  de datos que opencode oficial; no se pierde nada al cambiarla.
 
-El workflow `.github/workflows/build-and-release.yml`:
+- **¿Es una Skill de opencode?** No exactamente: es una mejora del propio
+  opencode (el servidor y la interfaz), por eso se distribuye como binario y no
+  como un plugin.
 
-- Revisa los releases de `anomalyco/opencode` cada día (04:30 UTC) y con
-  `workflow_dispatch` manual.
-- Si hay una versión nueva **no publicada aún**, clona, aplica los patches,
-  compila (`linux-x64` y `linux-arm64`) y publica:
-  - release versionado `toggle-<versión>` con `opencode-<versión>-toggle-<plataforma>`
-  - assets `opencode-<plataforma>` en el release `latest` (para el instalador)
-- Si un patch no aplica en una versión nueva, abre un issue avisando.
+- **¿Windows / macOS?** Esta página cubre Linux. Para macOS/Windows consulta
+  la sección _Compilar desde el código_ en el apéndice para contribuidores.
 
-Plataformas: Linux x64 y arm64. (macOS/Windows: usa `./build.sh` local.)
+## Actualizaciones
 
-## Notas
+Este repositorio se revisa automáticamente: cuando opencode publica una versión
+nueva, se compila de nuevo con esta mejora y se publica aquí. Así tienes lo
+último de opencode **con** el toggle, sin hacer nada.
 
-- La DB es la misma de opencode oficial (`opencode.db`, canal `latest`) — no se
-  pierden sesiones.
-- Esto no reemplaza un plugin: es una modificación del núcleo (server + TUI),
-  por eso se distribuye como binario.
-- Los commits corresponden a la rama de trabajo (2 commits originales + el fix
-  de persistencia/bloqueo real).
+## ¿Problemas?
+
+Abre un [issue](https://github.com/BenReynor/opencode-skill-toggle/issues) y
+cuéntanos qué pasa. Se agradece indicar tu sistema operativo y la versión.
+
+---
+
+*Build no oficial de opencode. opencode es de sus autores; esta versión añade
+la función de interruptor de skills.*
