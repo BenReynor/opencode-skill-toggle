@@ -21,20 +21,44 @@ instaladas.
 
 ### Con un solo comando
 
+**Linux / macOS**
+
 ```bash
 curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/latest/download/install.sh | bash
 ```
 
-Este comando descarga adaptado a tu sistema, lo instala y crea una copia de
-seguridad de la instalación anterior por si quieres volver.
+**Windows (PowerShell)**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/latest/download/install.ps1 | iex"
+```
+
+Estos comandos descargan el binario adecuado a tu sistema, lo instalan y crean
+una copia de seguridad de la instalación anterior por si quieres volver.
 
 ### Manual
 
 1. Ve a [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases)
-   y descarga el archivo que corresponda a tu sistema
-   (`opencode-linux-x64`, `opencode-linux-arm64`, `opencode-darwin-*`).
-2. Sustituye el binario existente de opencode por el descargado.
+   y descarga el archivo que corresponda a tu sistema:
+   `opencode-linux-x64`, `opencode-linux-arm64`, `opencode-linux-*-musl`,
+   `opencode-linux-x64-baseline`, `opencode-darwin-x64`, `opencode-darwin-arm64`
+   o `opencode-windows-x64`.
+2. Sustituye el binario existente de opencode por el descargado:
+   - Linux/macOS: reemplaza `~/.opencode/bin/opencode` (recuerda `chmod +x`).
+   - Windows: reemplaza `%USERPROFILE%\.opencode\bin\opencode.exe`.
 3. Si lo deseas, guarda antes una copia del anterior con otro nombre.
+
+> **Nota sobre binarios sin firmar**: esta build no está firmada. En macOS,
+> Gatekeeper puede bloquear la primera ejecución: usa _clic derecho > Abrir_ o
+> `xattr -dr com.apple.quarantine opencode`. En Windows,
+> SmartScreen avisará la primera vez: pulsa _Más información > Ejecutar de todas formas_.
+
+### ¿Qué binario Linux elijo?
+
+- `linux-x64` / `linux-arm64`: para la mayoría de distros (glibc) — Ubuntu,
+  Debian, Fedora, Arch, Mint, etc.
+- `linux-x64-musl` / `linux-arm64-musl`: para distros con **musl** (p.ej. Alpine).
+- `linux-x64-baseline`: para CPUs muy antiguas **sin AVX2**.
 
 ### Importante: desactiva la actualización automática
 
@@ -73,8 +97,9 @@ Tu elección se guarda en disco y se mantiene al reiniciar opencode.
   opencode (el servidor y la interfaz), por eso se distribuye como binario y no
   como un plugin.
 
-- **¿Windows / macOS?** Esta página cubre Linux. Para macOS/Windows consulta
-  la sección _Compilar desde el código_ en el apéndice para contribuidores.
+- **¿Windows / macOS?** Funciona en Linux, macOS y Windows (CLI de terminal). Para
+  Windows usa el instalador PowerShell descrito antes; macOS usa el mismo
+  instalador de `curl | bash` o el binario `opencode-darwin-*`.
 
 ## Actualizaciones
 

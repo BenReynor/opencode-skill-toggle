@@ -48,15 +48,10 @@ jobs:
   build:
     needs: detect
     if: ${{ (github.event.inputs.force == 'true') || (needs.detect.outputs.published == '') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            platform: linux-x64
-          - runner: ubuntu-24.04-arm
-            platform: linux-arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.detect.outputs.version }}
     steps:
       - name: Checkout repo (for patches)
         uses: actions/checkout@v4
@@ -92,56 +87,71 @@ jobs:
         working-directory: /tmp/opencode-src
         run: bun install --frozen-lockfile
 
-      - name: Build opencode
+      - name: Build opencode (cross-compile all targets)
         working-directory: /tmp/opencode-src/packages/opencode
         env:
           OPENCODE_CHANNEL: latest
           OPENCODE_VERSION: ${{ needs.detect.outputs.version }}
           SPLIT: "0"
-        run: bun run build --single --skip-embed-web-ui
+        run: bun run build --skip-embed-web-ui
 
       - name: Publish versioned release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.detect.outputs.version }}
-          PLATFORM: ${{ matrix.platform }}
         run: |
-          BIN="$(find /tmp/opencode-src/packages/opencode/dist -type f -path '*/bin/opencode' | head -1)"
-          ASSET="opencode-${VERSION}-toggle-${PLATFORM}"
-          cp "$BIN" "$RUNNER_TEMP/$ASSET"
+          # Binarios que publicamos (el build produce 12 variantes; elegimos las habituales)
+          PLATFORMS="linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl linux-x64-baseline darwin-x64 darwin-arm64 windows-x64"
+          cd /tmp/opencode-src/packages/opencode/dist
+          ASSETS=()
+          for PLATFORM in $PLATFORMS; do
+            BIN="$(find "$PLATFORM/bin" -maxdepth 1 -type f \( -name 'opencode' -o -name 'opencode.exe' \) | head -1)"
+            if [ -z "$BIN" ]; then
+              echo "::error::no binary found for $PLATFORM"
+              exit 1
+            fi
+            ASSET="opencode-${VERSION}-toggle-${PLATFORM}"
+            cp "$BIN" "$RUNNER_TEMP/$ASSET"
+            ASSETS+=("$RUNNER_TEMP/$ASSET")
+          done
           if gh release view "toggle-$VERSION" --json tagName >/dev/null 2>&1; then
-            gh release upload "toggle-$VERSION" "$RUNNER_TEMP/$ASSET" --clobber
+            gh release upload "toggle-$VERSION" "${ASSETS[@]}" --clobber
           else
-            gh release create "toggle-$VERSION" "$RUNNER_TEMP/$ASSET" \
+            gh release create "toggle-$VERSION" "${ASSETS[@]}" \
               --title "opencode $VERSION + skill-toggle" \
               --notes "Build custom de opencode **$VERSION** con el toggle de skills persistente.
 
-              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\`"
+              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows)."
           fi
 
       - name: Publish rolling "latest" assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PLATFORM: ${{ matrix.platform }}
         run: |
-          BIN="$(find /tmp/opencode-src/packages/opencode/dist -type f -path '*/bin/opencode' | head -1)"
-          LATEST_ASSET="opencode-${PLATFORM}"
-          cp "$BIN" "$RUNNER_TEMP/$LATEST_ASSET"
-          if gh release view latest --json tagName >/dev/null 2>&1; then
-            gh release upload latest "$RUNNER_TEMP/$LATEST_ASSET" --clobber
-          else
-            gh release create latest "$RUNNER_TEMP/$LATEST_ASSET" \
-              --title "latest" \
+          PLATFORMS="linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl linux-x64-baseline darwin-x64 darwin-arm64 windows-x64"
+          cd /tmp/opencode-src/packages/opencode/dist
+          ASSETS=()
+          for PLATFORM in $PLATFORMS; do
+            BIN="$(find "$PLATFORM/bin" -maxdepth 1 -type f \( -name 'opencode' -o -name 'opencode.exe' \) | head -1)"
+            if [ -z "$BIN" ]; then
+              echo "::error::no binary found for $PLATFORM"
+              exit 1
+            fi
+            ASSET="opencode-${PLATFORM}"
+            cp "$BIN" "$RUNNER_TEMP/$ASSET"
+            ASSETS+=("$RUNNER_TEMP/$ASSET")
+          done
+          gh release upload latest "${ASSETS[@]}" --clobber || \
+            gh release create latest "${ASSETS[@]}" --title "latest" \
               --notes "Binarios de la última versión compilada con skill-toggle. Descarga \`opencode-<platform>\`."
-          fi
 
-      - name: Copiar install.sh al release latest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Copiar installers al release latest
         run: |
+          FILES=()
+          for f in install.sh install.ps1; do
+            if [ -f "$GITHUB_WORKSPACE/$f" ]; then
+              FILES+=("$GITHUB_WORKSPACE/$f")
+            else
+              echo ">> aviso: $f no existe en el repo, se omite"
+            fi
+          done
           if gh release view latest --json tagName >/dev/null 2>&1; then
-            gh release upload latest "$GITHUB_WORKSPACE/install.sh" --clobber --clobber
+            gh release upload latest "${FILES[@]}" --clobber
           else
-            gh release create latest "$GITHUB_WORKSPACE/install.sh" \
-              --title "latest" --notes "instalador"
+            gh release create latest "${FILES[@]}" --title "latest" --notes "instalador"
           fi
