@@ -107,6 +107,22 @@ Este repositorio se revisa automáticamente: cuando opencode publica una versió
 nueva, se compila de nuevo con esta mejora y se publica aquí. Así tienes lo
 último de opencode **con** el toggle, sin hacer nada.
 
+## Seguridad
+
+- **Binarios verificados por SHA256**: cada release publica un archivo
+  `SHA256SUMS`. Los instaladores lo descargan y comprueban el binario antes de
+  instalarlo; si no coincide, se aborta.
+- **Construidos en GitHub Actions**: los binarios de las releases se compilan en
+  CI directamente desde el código de upstream + parches, no se suben binarios
+  hechos en local.
+- **Actions pineadas a SHA**: el workflow usa versiones concretas de
+  `actions/checkout` y `setup-bun` para evitar secuestro de tags.
+- **Sin secretos en el repo**: el workflow solo usa `GITHUB_TOKEN` con permisos
+  mínimos (`contents: write`, `issues: write`).
+- **Aviso**: al ser builds sin firmar, tu antivirus/SmartScreen/Gatekeeper puede
+  avisarte la primera vez. Verifica el SHA256 con
+  `shasum -a 256 opencode` (macOS) o `sha256sum opencode` (Linux).
+
 ## ¿Problemas?
 
 Abre un [issue](https://github.com/BenReynor/opencode-skill-toggle/issues) y
