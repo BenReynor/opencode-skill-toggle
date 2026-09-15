@@ -168,3 +168,35 @@ jobs:
           else
             gh release create latest --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --title "latest" --notes "instalador"
           fi
+
+  smoke:
+    name: Smoke ${{ matrix.platform }}
+    needs: [detect, build]
+    if: ${{ always() && needs.detect.result == 'success' && needs.build.result != 'failure' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-14
+            platform: darwin-x64
+          - os: windows-latest
+            platform: windows-x64
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      DOWNLOAD_BASE: https://github.com/${{ github.repository }}/releases/download/latest
+      EXPECTED_VERSION: ${{ needs.detect.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Smoke test del toggle (skill status/enable/disable + persistencia)
+        run: bash "$GITHUB_WORKSPACE/scripts/smoke-test.sh"
