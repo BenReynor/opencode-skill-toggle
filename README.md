@@ -1,69 +1,83 @@
-# opencode-skill-toggle
+# ✨ opencode-skill-toggle
 
-Una versión de **opencode** con un interruptor (toggle) para activar o
-desactivar **cada skill por separado**, y que recuerda tu elección.
+![CI](https://github.com/BenReynor/opencode-skill-toggle/actions/workflows/build-and-release.yml/badge.svg)
+![Release](https://img.shields.io/github/v/release/BenReynor/opencode-skill-toggle)
+![Plataformas](https://img.shields.io/badge/plataformas-Linux%20·%20macOS%20·%20Windows-informational)
 
-Mantienes instaladas todas las skills que quieras, pero solo se cargan las que
-tienes activadas: las desactivadas no aparecen en las sugerencias del modelo y
-se rechazan al pedirlas. Así evitas saturar opencode cuando tienes muchas skills
-instaladas.
+> 🎚️ **opencode con un interruptor para cada skill.** Activa o desactiva las
+> skills por separado y él **recuerda tu decisión** entre reinicios.
 
-## Qué hace
+Mantén instaladas todas las skills que quieras, pero solo se cargan las que tienes
+**activadas**. Las desactivadas dejan de saturar las sugerencias del modelo y se
+rechazan si alguien intenta pedirlas.
 
-| | opencode oficial | Esta versión |
-|---|---|---|
-| Activar / desactivar una skill | — | ✓ |
-| La desactivada desaparece del entorno del modelo | — | ✓ |
-| Se rechaza si la pides desactivada | — | ✓ |
-| Recuerda tu elección entre reinicios | — | ✓ |
+---
 
-## Instalar
+## 🚀 Qué hace
 
-### Con un solo comando
+| Emoji | Función |
+|-------|---------|
+| 🎚️ | Enciende y apaga **cada skill por separado** |
+| 🧹 | Las skills desactivadas **desaparecen del entorno del modelo** |
+| 🚫 | Si pides una skill desactivada, **se rechaza** limpiamente |
+| 🧠 | Tu elección **se guarda en disco** y sobrevive a los reinicios |
+| 💾 | Usa la misma base de datos: **no pierdes conversaciones ni ajustes** |
+| 🖥️ | Funciona en **Linux, macOS y Windows** (CLI de terminal) |
 
-**Linux / macOS**
+---
+
+## 📥 Instalación
+
+### 🟢 Linux / macOS — un solo comando
 
 ```bash
 curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.sh | bash
 ```
 
-**Windows (PowerShell)**
+### 🔵 Windows — un solo comando (PowerShell)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.ps1 | iex"
 ```
 
-Estos comandos descargan el binario adecuado a tu sistema, lo instalan y crean
-una copia de seguridad de la instalación anterior por si quieres volver.
+> El instalador detecta tu plataforma, descarga el binario adecuado, **verifica su
+> SHA256** y crea una copia de seguridad de la instalación anterior.
 
-### Manual
+### 📦 Manual
 
-1. Ve a [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases)
-   y descarga el archivo que corresponda a tu sistema:
-   `opencode-linux-x64`, `opencode-linux-arm64`, `opencode-linux-*-musl`,
-   `opencode-linux-x64-baseline`, `opencode-darwin-x64`, `opencode-darwin-arm64`
-   o `opencode-windows-x64`.
-2. Sustituye el binario existente de opencode por el descargado:
-   - Linux/macOS: reemplaza `~/.opencode/bin/opencode` (recuerda `chmod +x`).
-   - Windows: reemplaza `%USERPROFILE%\.opencode\bin\opencode.exe`.
-3. Si lo deseas, guarda antes una copia del anterior con otro nombre.
+1. Ve a [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases).
+2. Descarga tu binario:
 
-> **Nota sobre binarios sin firmar**: esta build no está firmada. En macOS,
-> Gatekeeper puede bloquear la primera ejecución: usa _clic derecho > Abrir_ o
-> `xattr -dr com.apple.quarantine opencode`. En Windows,
-> SmartScreen avisará la primera vez: pulsa _Más información > Ejecutar de todas formas_.
+   | Sistema | Archivo |
+   |---------|---------|
+   | 🐧 Linux x64 | `opencode-linux-x64` |
+   | 🐧 Linux ARM | `opencode-linux-arm64` |
+   | 🐧 Linux musl | `opencode-linux-*-musl` |
+   | 🐧 Linux CPUs antiguas | `opencode-linux-x64-baseline` |
+   | 🍎 macOS Intel | `opencode-darwin-x64` |
+   | 🍎 macOS Apple Silicon | `opencode-darwin-arm64` |
+   | 🪟 Windows x64 | `opencode-windows-x64` |
 
-### ¿Qué binario Linux elijo?
+3. Sustituye el binario de opencode:
+   - **Linux/macOS**: `~/.opencode/bin/opencode` (recuerda `chmod +x`).
+   - **Windows**: `%USERPROFILE%\.opencode\bin\opencode.exe`.
+4. Opcional: guarda antes una copia del anterior.
 
-- `linux-x64` / `linux-arm64`: para la mayoría de distros (glibc) — Ubuntu,
-  Debian, Fedora, Arch, Mint, etc.
-- `linux-x64-musl` / `linux-arm64-musl`: para distros con **musl** (p.ej. Alpine).
-- `linux-x64-baseline`: para CPUs muy antiguas **sin AVX2**.
+> **🔓 Binarios sin firmar**: en macOS, Gatekeeper puede bloquear la primera
+> ejecución (_clic derecho > Abrir_ o `xattr -dr com.apple.quarantine opencode`).
+> En Windows, SmartScreen avisará la primera vez (_Más información > Ejecutar de
+> todas formas_).
 
-### Importante: desactiva la actualización automática
+### 🤔 ¿Qué binario Linux elijo?
 
-Para que el instalador oficial de opencode no reemplace esta versión, añade
-esto a tu archivo de configuración (`opencode.json`):
+- **`linux-x64` / `linux-arm64`** — la mayoría de distros (glibc): Ubuntu, Debian,
+  Fedora, Arch, Mint…
+- **`linux-x64-musl` / `linux-arm64-musl`** — distros con **musl** (p. ej. Alpine).
+- **`linux-x64-baseline`** — CPUs muy antiguas **sin AVX2**.
+
+### ⚠️ Desactiva la actualización automática
+
+Para que el instalador oficial no reemplace esta versión, añade a `opencode.json`:
 
 ```json
 {
@@ -71,9 +85,11 @@ esto a tu archivo de configuración (`opencode.json`):
 }
 ```
 
-Reinicia opencode cuando termines.
+Reinicia opencode cuando termines. ✅
 
-## Cómo se usa
+---
+
+## 🕹️ Cómo se usa
 
 Abre el diálogo de opencode y escribe:
 
@@ -83,52 +99,59 @@ Abre el diálogo de opencode y escribe:
 
 Selecciona la skill que quieras y actívala o desactívala:
 
-- `✓ Enabled` — la skill está activa.
-- `○ Disabled` — la skill está desactivada (no se carga ni se puede pedir).
+- ✅ **Enabled** — la skill está activa y disponible.
+- ⭕ **Disabled** — la skill está desactivada; no se carga ni se puede pedir.
 
-Tu elección se guarda en disco y se mantiene al reiniciar opencode.
-
-## Preguntas frecuentes
-
-- **¿Pierdo mis conversaciones o ajustes?** No. Esta versión usa la misma base
-  de datos que opencode oficial; no se pierde nada al cambiarla.
-
-- **¿Es una Skill de opencode?** No exactamente: es una mejora del propio
-  opencode (el servidor y la interfaz), por eso se distribuye como binario y no
-  como un plugin.
-
-- **¿Windows / macOS?** Funciona en Linux, macOS y Windows (CLI de terminal). Para
-  Windows usa el instalador PowerShell descrito antes; macOS usa el mismo
-  instalador de `curl | bash` o el binario `opencode-darwin-*`.
-
-## Actualizaciones
-
-Este repositorio se revisa automáticamente: cuando opencode publica una versión
-nueva, se compila de nuevo con esta mejora y se publica aquí. Así tienes lo
-último de opencode **con** el toggle, sin hacer nada.
-
-## Seguridad
-
-- **Binarios verificados por SHA256**: cada release publica un archivo
-  `SHA256SUMS`. Los instaladores lo descargan y comprueban el binario antes de
-  instalarlo; si no coincide, se aborta.
-- **Construidos en GitHub Actions**: los binarios de las releases se compilan en
-  CI directamente desde el código de upstream + parches, no se suben binarios
-  hechos en local.
-- **Actions pineadas a SHA**: el workflow usa versiones concretas de
-  `actions/checkout` y `setup-bun` para evitar secuestro de tags.
-- **Sin secretos en el repo**: el workflow solo usa `GITHUB_TOKEN` con permisos
-  mínimos (`contents: write`, `issues: write`).
-- **Aviso**: al ser builds sin firmar, tu antivirus/SmartScreen/Gatekeeper puede
-  avisarte la primera vez. Verifica el SHA256 con
-  `shasum -a 256 opencode` (macOS) o `sha256sum opencode` (Linux).
-
-## ¿Problemas?
-
-Abre un [issue](https://github.com/BenReynor/opencode-skill-toggle/issues) y
-cuéntanos qué pasa. Se agradece indicar tu sistema operativo y la versión.
+Tu elección se guarda al instante en disco y se mantiene al reiniciar. 🔁
 
 ---
 
-*Build no oficial de opencode. opencode es de sus autores; esta versión añade
-la función de interruptor de skills.*
+## ❓ Preguntas frecuentes
+
+- **¿Pierdo mis conversaciones o ajustes?**
+  No. Esta versión usa la misma base de datos de opencode; no se pierde nada.
+
+- **¿Es una Skill de opencode?**
+  No exactamente: es una mejora del propio opencode (servidor e interfaz), por eso
+  se distribuye como binario y no como plugin.
+
+- **¿Funciona en Windows / macOS?**
+  Sí. Linux, macOS y Windows, todo desde el terminal. En Windows usa el instalador
+  PowerShell; en macOS el de `curl | bash` o el binario `opencode-darwin-*`.
+
+- **¿Puedo desactivar todas las skills?**
+  Sí, cada skill se gestiona de forma independiente. Puedes dejarlas todas
+  apagadas o solo las que no uses.
+
+---
+
+## 🔄 Actualizaciones
+
+Este repositorio se revisa automáticamente: cuando opencode publica una versión
+nueva, se compila de nuevo con el interruptor y se publica aquí. Así siempre
+tienes lo último **con** el toggle, sin hacer nada.
+
+---
+
+## 🔒 Seguridad
+
+- **🔐 SHA256 verificado**: cada release publica `SHA256SUMS`; el instalador
+  comprueba el binario antes de instalarlo y aborta si no coincide.
+- **🏭 Compilado en GitHub Actions**: los binarios se crean en CI desde el código
+  de upstream + parches, no se suben binarios hechos a mano.
+- **🔗 Actions pineadas a SHA**: versión concreta y fija de `actions/checkout` y
+  `setup-bun`.
+- **🔑 Sin secretos**: el workflow solo usa `GITHUB_TOKEN` con permisos mínimos.
+- Puedes verificar cualquier binario con:
+  `shasum -a 256 opencode` (macOS) o `sha256sum opencode` (Linux).
+
+---
+
+## 🆘 ¿Problemas?
+
+Abre un [issue](https://github.com/BenReynor/opencode-skill-toggle/issues) e indica
+tu sistema operativo y la versión que usas. ¡Gracias por reportar! 🙌
+
+---
+
+*Build personal de opencode con la función de interruptor de skills.*
