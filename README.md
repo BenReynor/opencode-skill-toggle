@@ -22,7 +22,7 @@ rechazan si alguien intenta pedirlas.
 | 🚫 | Si pides una skill desactivada, **se rechaza** limpiamente |
 | 🧠 | Tu elección **se guarda en disco** y sobrevive a los reinicios |
 | 💾 | Usa la misma base de datos: **no pierdes conversaciones ni ajustes** |
-| 🛡️ | Guardián opcional que restaura el toggle si la actualización oficial lo pisa |
+| 🛡️ | Guardián que restaura el toggle si la actualización oficial lo pisa (Linux) |
 | 🖥️ | Funciona en **Linux, macOS y Windows** (CLI de terminal) |
 
 ---
@@ -82,21 +82,6 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 - **`linux-x64-musl` / `linux-arm64-musl`** — distros con **musl** (p. ej. Alpine).
 - **`linux-x64-baseline`** — CPUs muy antiguas **sin AVX2**.
 
-### ⚠️ Desactiva la actualización automática
-
-Para que el instalador oficial no reemplace esta versión, añade a `opencode.json`:
-
-```json
-{
-  "autoupdate": false
-}
-```
-
-Reinicia opencode cuando termines. ✅
-
-> 🛡️ **Otra vía**: prefiere mantener el autoupdate oficial y dejar que el
-> guardián anti-borrado (sección más abajo) restaure el toggle solo.
-
 ---
 
 ## 🕹️ Cómo se usa
@@ -146,11 +131,6 @@ El diálogo `/skill-toggle` de la interfaz hace exactamente lo mismo.
   Sí, cada skill se gestiona de forma independiente. Puedes dejarlas todas
   apagadas o solo las que no uses.
 
-- **¿El guardián anti-borrado deja un proceso en segundo plano de espera?**
-  No. No hay ningún daemon propio: lo vigila el `systemd --user` que ya corre en
-  tu sesión (inotify + un timer). Solo se lanza `toggle-guard.sh` un instante
-  cuando el binario cambia — y si no hay nada que hacer, sale en milisegundos.
-
 - **¿El guardián funciona también en macOS / Windows?**
   Todavía no: el guardián automático está disponible en **Linux con systemd**.
   macOS (launchd) y Windows (Task Scheduler) pueden usar el mismo
@@ -160,26 +140,33 @@ El diálogo `/skill-toggle` de la interfaz hace exactamente lo mismo.
 
 ## 🔄 Actualizaciones
 
-Este repositorio se revisa automáticamente: cuando opencode publica una versión
-nueva, se compila de nuevo con el interruptor y se publica aquí. Así siempre
-tienes lo último **con** el toggle, sin hacer nada.
+Este repositorio se reconstruye solo: cuando opencode publica una versión nueva,
+se compila de nuevo con el interruptor y se publica en `latest`. Así siempre
+tienes lo último **con** el toggle.
 
-¿Cómo evitas que la actualización oficial **borre** tu toggle?
+La actualización oficial reemplaza `~/.opencode/bin/opencode` por el binario
+limpio, así que debes decidir cómo tratarla:
 
-1. **`autoupdate: false`** en `opencode.json` (sección de arriba). El instalador
-   oficial ya no sobreescribirá tu binario.
-2. **Para actualizar de verdad**, vuelve a ejecutar el mismo comando de
-   instalación: descarga la última build con toggle desde nuestro release
-   `latest`. Es lo único que necesitas recordar.
+**Opción 1 — Actualizar manualmente** *(sin sorpresas)*
 
-> El comando oficial `opencode upgrade` sí reemplaza `~/.opencode/bin/opencode`
-> por el binario oficial limpio; por eso se desactiva. Nuestra build aplica el
-> mismo toggle a las versiones nuevas, así que actualizar desde este repo no
-> pierde nada.
+Desactiva el autoupdate en `opencode.json`:
+
+```json
+{
+  "autoupdate": false
+}
+```
+
+Con eso el instalador oficial no toca tu binario. Para actualizar, vuelve a
+ejecutar el comando de instalación: descargará la última build con toggle desde
+nuestro release `latest`. Es lo único que necesitas recordar.
+
+**Opción 2 — Toggle a prueba de actualizaciones** *(con autoupdate activo)*
+
+Prefieres el autoupdate oficial y que el toggle se restaure solo.
 
 ### 🛡️ Guardián anti-borrado (Linux)
 
-¿Prefieres **mantener el autoupdate oficial** y que el toggle se restaure solo?
 El instalador activa por defecto un guardián basado en `systemd --user`:
 
 - Tras instalar deja un **marcador** con el SHA-256 del binario con toggle
@@ -224,7 +211,3 @@ Log de actividad: `~/.opencode/toggle-guard.log`.
 
 Abre un [issue](https://github.com/BenReynor/opencode-skill-toggle/issues) e indica
 tu sistema operativo y la versión que usas. ¡Gracias por reportar! 🙌
-
----
-
-*Build personal de opencode con la función de interruptor de skills.*
