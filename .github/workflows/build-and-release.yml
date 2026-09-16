@@ -153,10 +153,10 @@ jobs:
               --notes "Binarios de la última versión compilada con skill-toggle. Descarga \`opencode-<platform>\` y verifica con SHA256SUMS."
           fi
 
-      - name: Copiar installers al release latest
+      - name: Copiar installers y guardianes al release latest
         run: |
           FILES=()
-          for f in install.sh install.ps1 scripts/toggle-guard.sh; do
+          for f in install.sh install.ps1 scripts/toggle-guard.sh scripts/toggle-guard.ps1; do
             if [ -f "$GITHUB_WORKSPACE/$f" ]; then
               FILES+=("$GITHUB_WORKSPACE/$f")
             else

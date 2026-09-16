@@ -111,11 +111,13 @@ echo "$HASH_ACTUAL" > "$ORIG.sha256"
 echo ">> opencode con skill-toggle instalado: $ORIG"
 echo
 
-# --- Guardián anti-borrado (opcional, Linux con systemd) ---------------------
+# --- Guardián anti-borrado ----------------------------------------------------
 # Si el installador oficial (autoupdate / "opencode upgrade") reemplaza el
 # binario, toggle-guard.sh lo restaura en segundo plano.
-if [[ "${TOGGLE_GUARD:-1}" == "1" ]] && command -v systemctl >/dev/null 2>&1 \
-   && [[ "$(uname -s)" == "Linux" ]]; then
+#   - Linux:  systemd --user (.path con inotify + .timer cada 15 min)
+#   - macOS:  launchd (LaunchAgent con StartInterval de 15 min)
+#   - Windows: Scheduled Task (lo gestiona install.ps1)
+if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
   GUARD="$HOME/.opencode/toggle-guard.sh"
   if [[ -f "$SCRIPT_DIR/scripts/toggle-guard.sh" ]]; then
     cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
@@ -125,12 +127,14 @@ if [[ "${TOGGLE_GUARD:-1}" == "1" ]] && command -v systemctl >/dev/null 2>&1 \
       "https://github.com/$GH_REPO/releases/download/latest/toggle-guard.sh" \
       -o "$GUARD"
   fi
-  chmod +x "$GUARD"
+  chmod +x "$GUARD" 2>/dev/null || true
 
-  UDIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-  mkdir -p "$UDIR"
+  OS="$(uname -s)"
+  if [[ "$OS" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+    UDIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    mkdir -p "$UDIR"
 
-  cat > "$UDIR/opencode-toggle-guard.path" <<EOF
+    cat > "$UDIR/opencode-toggle-guard.path" <<EOF
 [Unit]
 Description=Detecta cambios en el binario de opencode (skill-toggle)
 
@@ -142,7 +146,7 @@ Unit=opencode-toggle-guard.service
 WantedBy=default.target
 EOF
 
-  cat > "$UDIR/opencode-toggle-guard.service" <<EOF
+    cat > "$UDIR/opencode-toggle-guard.service" <<EOF
 [Unit]
 Description=Reinstala el skill-toggle si el binario de opencode fue reemplazado
 
@@ -151,7 +155,7 @@ Type=oneshot
 ExecStart=%h/.opencode/toggle-guard.sh
 EOF
 
-  cat > "$UDIR/opencode-toggle-guard.timer" <<EOF
+    cat > "$UDIR/opencode-toggle-guard.timer" <<EOF
 [Unit]
 Description=Copia de seguridad del skill-toggle (cada 15 min)
 
@@ -163,28 +167,63 @@ OnUnitActiveSec=15min
 WantedBy=default.target
 EOF
 
-  if systemctl --user daemon-reload 2>/dev/null; then
-    systemctl --user enable --now opencode-toggle-guard.path \
-      opencode-toggle-guard.timer >/dev/null 2>&1 || true
-    systemctl --user start opencode-toggle-guard.service >/dev/null 2>&1 || true
-    echo ">> Guardián anti-borrado activado (systemd --user):"
-    echo ">>   - reinstala el toggle si el autoupdate oficial lo reemplaza"
-    echo ">>   - log: $HOME/.opencode/toggle-guard.log"
-    echo ">>   - desactivar: TOGGLE_GUARD=0 $0  y  systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer"
+    if systemctl --user daemon-reload 2>/dev/null; then
+      systemctl --user enable --now opencode-toggle-guard.path \
+        opencode-toggle-guard.timer >/dev/null 2>&1 || true
+      systemctl --user start opencode-toggle-guard.service >/dev/null 2>&1 || true
+      echo ">> Guardián anti-borrado activado (systemd --user)"
+      echo ">>   - desactivar: systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer"
+    else
+      echo ">> Aviso: systemd --user no disponible; añade a cron: */15 * * * * $GUARD" >&2
+    fi
+
+  elif [[ "$OS" == "Darwin" ]]; then
+    LA="$HOME/Library/LaunchAgents/com.opencode.skill-toggle-guard.plist"
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$LA" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.opencode.skill-toggle-guard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>$GUARD</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+EOF
+    launchctl unload "$LA" >/dev/null 2>&1 || true
+    if launchctl load -w "$LA" >/dev/null 2>&1; then
+      echo ">> Guardián anti-borrado activado (launchd: $LA)"
+      echo ">>   - desactivar: launchctl unload -w $LA"
+    else
+      echo ">> Aviso: no se pudo cargar el LaunchAgent $LA" >&2
+    fi
+
   else
-    echo ">> Aviso: systemd --user no disponible; guardián instalado pero sin activar" >&2
+    echo ">> Guardián desplegado en $GUARD pero sin planificador para $OS;"
+    echo ">>   añádelo a cron: */15 * * * * $GUARD"
   fi
 else
-  echo ">> Guardián anti-borrado no instalado (TOGGLE_GUARD=0 o sin systemd)"
+  echo ">> Guardián anti-borrado no instalado (TOGGLE_GUARD=0)"
 fi
 
 cat <<'EOF'
 Aviso importante:
   - Esta es una build personalizada (no oficial). Mantiene tu opencode.db real.
   - Al descargar de GitHub Releases, el binario se verifica contra SHA256SUMS.
-  - Configura "autoupdate": false en opencode.json para que el instalador
-    oficial no la reemplace al actualizar (este repo reconstruye la build con
-    cada versión nueva de upstream; actualizar = volver a correr este script).
+  - Guardián anti-borrado ya configurado por defecto: restaura el toggle si la
+    actualización oficial lo reemplaza. (Alternativa: "autoupdate": false en
+    opencode.json desactiva el autoupdate oficial; ambas cosas se explican en
+    el README, sección Actualizaciones.)
   - El reemplazo es atómico: puedes reinstalar incluso con opencode abierto.
   - Reinicia opencode para que el binario nuevo quede activo.
 EOF

@@ -99,14 +99,56 @@ if (Test-Path $Final) {
 # --- Instalar ---------------------------------------------------------------
 Move-Item -Force $Tmp $Final
 Write-Step "Instalado: $Final"
-Write-Host ""
 
+# --- Marcador para el guardián ---
+$ActualHash = (Get-FileHash -LiteralPath $Final -Algorithm SHA256).Hash.ToLower()
+Set-Content -LiteralPath "$Final.sha256" -Value $ActualHash -NoNewline
+
+# --- Guardián anti-borrado (Task Scheduler) --------------------------------
+if ($env:TOGGLE_GUARD -ne "0") {
+  $Guard = Join-Path $HOME ".opencode\toggle-guard.ps1"
+  if ($PSScriptRoot) {
+    $LocalGuard = Join-Path $PSScriptRoot "scripts\toggle-guard.ps1"
+    if (Test-Path -LiteralPath $LocalGuard) {
+      Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
+    } else {
+      Write-Step "Descargando toggle-guard.ps1"
+      Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/latest/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
+    }
+  } else {
+    Write-Step "Descargando toggle-guard.ps1"
+    Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/latest/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
+  }
+
+  $TaskName = "opencode-skill-toggle-guard"
+  $Action = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Guard`""
+  $TriggerRun = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration ([TimeSpan]::MaxValue)
+  $TriggerLogon = New-ScheduledTaskTrigger -AtLogOn
+
+  try {
+    Register-ScheduledTask -TaskName $TaskName -Action $Action `
+      -Trigger $TriggerRun, $TriggerLogon -Force | Out-Null
+    Start-ScheduledTask -TaskName $TaskName
+    Write-Step "Guardián anti-borrado activado (Task Scheduler: $TaskName)"
+    Write-Step "  - log: $(Join-Path $HOME '.opencode\toggle-guard.log')"
+    Write-Step "  - desactivar: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
+  } catch {
+    Write-Warning "No se pudo registrar el guardián: $($_.Exception.Message)"
+  }
+} else {
+  Write-Step "Guardián anti-borrado no instalado (TOGGLE_GUARD=0)"
+}
+
+Write-Host ""
 Write-Host @"
 Aviso importante:
   - Esta es una build personalizada (no oficial). Mantiene tu opencode.db real.
   - Al descargar de GitHub Releases, el binario se verifica contra SHA256SUMS.
-  - Configura "autoupdate": false en opencode.json para que no la reemplace
-    el instalador oficial.
+  - Guardián anti-borrado ya configurado por defecto: restaura el toggle si la
+    actualización oficial lo reemplaza. (Alternativa: "autoupdate": false en
+    opencode.json desactiva el autoupdate oficial; ver README / Actualizaciones.)
   - Al ser un binario sin firma, Windows SmartScreen puede mostrarte un aviso
     la primera vez: pulsa "Más información" > "Ejecutar de todas formas".
   - Reinicia opencode para que el binario nuevo quede activo.
