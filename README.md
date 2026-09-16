@@ -22,7 +22,7 @@ rechazan si alguien intenta pedirlas.
 | 🚫 | Si pides una skill desactivada, **se rechaza** limpiamente |
 | 🧠 | Tu elección **se guarda en disco** y sobrevive a los reinicios |
 | 💾 | Usa la misma base de datos: **no pierdes conversaciones ni ajustes** |
-| 🛡️ | Guardián que restaura el toggle si la actualización oficial lo pisa (Linux) |
+| 🛡️ | Guardián que restaura el toggle si la actualización oficial lo pisa (Linux · macOS · Windows) |
 | 🖥️ | Funciona en **Linux, macOS y Windows** (CLI de terminal) |
 
 ---
@@ -46,9 +46,10 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 > es **atómico**: puedes reinstalar incluso con opencode abierto (el proceso en
 > marcha conserva su binario viejo; las sesiones nuevas usan el nuevo).
 >
-> En **Linux con systemd**, además queda activo por defecto el 🛡️ **guardián
-> anti-borrado**: si el autoupdate oficial reemplaza tu binario, el toggle se
-> restaura solo en segundo plano (desactivable con `TOGGLE_GUARD=0`).
+> En **Linux, macOS y Windows** el instalador deja activo por defecto el 🛡️
+> **guardián anti-borrado** (systemd / launchd / Task Scheduler): si el autoupdate
+> oficial reemplaza tu binario, el toggle se restaura solo en segundo plano
+> (desactivable con `TOGGLE_GUARD=0`).
 
 ### 📦 Manual
 
@@ -132,9 +133,9 @@ El diálogo `/skill-toggle` de la interfaz hace exactamente lo mismo.
   apagadas o solo las que no uses.
 
 - **¿El guardián funciona también en macOS / Windows?**
-  Todavía no: el guardián automático está disponible en **Linux con systemd**.
-  macOS (launchd) y Windows (Task Scheduler) pueden usar el mismo
-  `toggle-guard.sh`, aún por integrar en el instalador.
+  Sí. macOS usa un LaunchAgent (launchd, cada 15 min) y Windows un Scheduled
+  Task (cada 15 min y al iniciar sesión); los activa `install.sh` / `install.ps1`
+  automáticamente.
 
 ---
 
@@ -144,12 +145,58 @@ Este repositorio se reconstruye solo: cuando opencode publica una versión nueva
 se compila de nuevo con el interruptor y se publica en `latest`. Así siempre
 tienes lo último **con** el toggle.
 
-La actualización oficial reemplaza `~/.opencode/bin/opencode` por el binario
-limpio, así que debes decidir cómo tratarla:
+La actualización oficial reemplaza `~/.opencode/bin/opencode` (o `opencode.exe`)
+por el binario limpio. Para que el toggle nunca se pierda, el instalador deja
+**ya activo por defecto** el guardián anti-borrado:
 
-**Opción 1 — Actualizar manualmente** *(sin sorpresas)*
+### 🛡️ Guardián anti-borrado (ya viene configurado)
 
-Desactiva el autoupdate en `opencode.json`:
+Restaura el toggle solo, en segundo plano, si el binario fue reemplazado:
+
+- Tras instalar deja un **marcador** con el SHA-256 del binario con toggle
+  (un `opencode.sha256` junto al binario).
+- El guardián (`toggle-guard.sh` en Linux/macOS, `toggle-guard.ps1` en Windows)
+  compara ese marcador con el binario actual; si difiere, descarga la build con
+  toggle de `latest`, **verifica su SHA256** y la reinstala (reemplazo atómico,
+  sin cortar lo que esté en marcha).
+- Qué lo dispara según el sistema:
+
+  | Sistema | Mecanismo |
+  |---------|-----------|
+  | Linux | systemd `--user`: `.path` (inotify) + `.timer` cada 15 min |
+  | macOS | launchd LaunchAgent cada 15 min |
+  | Windows | Task Scheduler cada 15 min y al iniciar sesión |
+
+> **No deja ningún proceso en espera**: no hay daemon propio. Lo vigila el
+> planificador del sistema (ya residente) y solo ejecuta el guardián un instante
+> cuando hay algo que hacer.
+
+Comprobar su estado y desactivarlo:
+
+```bash
+# estado (Linux)
+systemctl --user status opencode-toggle-guard.timer
+
+# desactivar (Linux)
+systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer
+
+# desactivar (macOS)
+launchctl unload -w ~/Library/LaunchAgents/com.opencode.skill-toggle-guard.plist
+
+# desactivar (Windows, PowerShell)
+Unregister-ScheduledTask -TaskName 'opencode-skill-toggle-guard' -Confirm:$false
+
+# que los instaladores no lo vuelvan a crear
+TOGGLE_GUARD=0 ./install.sh
+```
+
+Log de actividad: `~/.opencode/toggle-guard.log`.
+
+**Opción alternativa — desactivar el autoupdate oficial**
+
+Si prefieres que el instalador oficial jamás toque tu binario (con esto el
+guardián ya no es necesario, aunque tampoco estorba), desactiva el autoupdate en
+`opencode.json`:
 
 ```json
 {
@@ -157,39 +204,8 @@ Desactiva el autoupdate en `opencode.json`:
 }
 ```
 
-Con eso el instalador oficial no toca tu binario. Para actualizar, vuelve a
-ejecutar el comando de instalación: descargará la última build con toggle desde
-nuestro release `latest`. Es lo único que necesitas recordar.
-
-**Opción 2 — Toggle a prueba de actualizaciones** *(con autoupdate activo)*
-
-Prefieres el autoupdate oficial y que el toggle se restaure solo.
-
-### 🛡️ Guardián anti-borrado (Linux)
-
-El instalador activa por defecto un guardián basado en `systemd --user`:
-
-- Tras instalar deja un **marcador** con el SHA-256 del binario con toggle
-  (`~/.opencode/bin/opencode.sha256`).
-- `~/.opencode/toggle-guard.sh` se dispara cuando el binario cambia (`.path` con
-  inotify del kernel + `.timer` de respaldo cada 15 min).
-- Si el autoupdate oficial o `opencode upgrade` reemplazan tu binario, el
-  guardián descarga la build con toggle de `latest`, **verifica su SHA256** y la
-  restaura al instante (reemplazo atómico, sin cortar lo que esté en marcha).
-
-> **No deja ningún proceso en espera.** No existe un daemon propio: lo vigila el
-> propio `systemd --user` (ya residente en tu sesión) con inotify + un timer, y
-> solo ejecuta el script un instante cuando hay que actuar. Si no hay nada que
-> hacer, el chequeo dura milisegundos.
-
-Se desactiva con:
-
-```bash
-TOGGLE_GUARD=0 ./install.sh        # no instalar el guardián
-systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer
-```
-
-Log de actividad: `~/.opencode/toggle-guard.log`.
+Para actualizar entonces, vuelve a ejecutar el comando de instalación:
+descargará la última build con toggle desde nuestro release `latest`.
 
 ---
 
