@@ -29,6 +29,7 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       tag: ${{ steps.resolve.outputs.tag }}
       published: ${{ steps.resolve.outputs.published }}
+      build_tag: ${{ steps.resolve.outputs.build_tag }}
     steps:
       - name: Resolve version
         id: resolve
@@ -41,9 +42,20 @@ jobs:
             V="$(gh api repos/anomalyco/opencode/releases/latest --jq .tag_name | sed 's/^v//')"
           fi
           PUBLISHED="$(gh release view "toggle-$V" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || echo '')"
+          # Cada build va a un TAG ÚNICO: si es versión nueva se publica en
+          # toggle-$V; si es rebuild forzado, en toggle-$V-r<run>. Así el
+          # contenido de cada release nunca cambia y se evita mezclar bins
+          # viejos/nuevos en la caché del CDN (problema de sobrescribir
+          # "latest" o "toggle-$V" con --clobber).
+          if [ -n "$PUBLISHED" ]; then
+            BUILD_TAG="toggle-${V}-r${{ github.run_number }}"
+          else
+            BUILD_TAG="toggle-$V"
+          fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "tag=v$V" >> "$GITHUB_OUTPUT"
           echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          echo "build_tag=$BUILD_TAG" >> "$GITHUB_OUTPUT"
 
   build:
     needs: detect
@@ -52,6 +64,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VERSION: ${{ needs.detect.outputs.version }}
+      BUILD_TAG: ${{ needs.detect.outputs.build_tag }}
     steps:
       - name: Checkout repo (for patches)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -95,7 +108,7 @@ jobs:
           SPLIT: "0"
         run: bun run build --skip-embed-web-ui
 
-      - name: Publish versioned release (+ SHA256SUMS)
+      - name: Publish versioned release en tag único (+ SHA256SUMS + scripts)
         run: |
           # Binarios que publicamos (el build produce 12 variantes; elegimos las habituales)
           PLATFORMS="linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl linux-x64-baseline darwin-x64 darwin-arm64 windows-x64"
@@ -112,18 +125,33 @@ jobs:
             ASSET="opencode-${VERSION}-toggle-${PLATFORM}"
             cp "$BIN" "$DEST/$ASSET"
             ASSETS+=("$DEST/$ASSET")
+            # Además del nombre versionado, los mismos binarios con el nombre
+            # plano (como en "latest") para que sirvan de respaldo por estética.
+            cp "$BIN" "$DEST/opencode-${PLATFORM}"
+            ASSETS+=("$DEST/opencode-${PLATFORM}")
           done
           cd "$DEST"
           sha256sum opencode-* > SHA256SUMS
           ASSETS+=("$DEST/SHA256SUMS")
-          if gh release view "toggle-$VERSION" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
-            gh release upload "toggle-$VERSION" --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" --clobber
+          for f in "$GITHUB_WORKSPACE/install.sh" "$GITHUB_WORKSPACE/install.ps1" \
+                   "$GITHUB_WORKSPACE/scripts/toggle-guard.sh" "$GITHUB_WORKSPACE/scripts/toggle-guard.ps1" \
+                   "$GITHUB_WORKSPACE/scripts/toggle-cleanup.sh" "$GITHUB_WORKSPACE/scripts/toggle-cleanup.ps1"; do
+            if [ -f "$f" ]; then
+              ASSETS+=("$f")
+            else
+              echo ">> aviso: $f no existe, se omite"
+            fi
+          done
+          if gh release view "$BUILD_TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
+            gh release upload "$BUILD_TAG" --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" --clobber
           else
-            gh release create "toggle-$VERSION" --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" \
-              --title "opencode $VERSION + skill-toggle" \
+            gh release create "$BUILD_TAG" --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" \
+              --title "opencode $VERSION + skill-toggle ($BUILD_TAG)" \
               --notes "Build custom de opencode **$VERSION** con el toggle de skills persistente.
 
-              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows). Verifica el SHA256 de tu binario con SHA256SUMS."
+Release de build **único** (nunca se sobrescribe): el instalador y el guardián resuelven el tag **$BUILD_TAG** (o el más reciente \`toggle-*\`) por la API para descargar siempre el binario correcto.
+
+Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows). Verifica el SHA256 de tu binario con SHA256SUMS."
           fi
 
       - name: Publish rolling "latest" assets (+ SHA256SUMS)
@@ -156,7 +184,7 @@ jobs:
       - name: Copiar installers y guardianes al release latest
         run: |
           FILES=()
-          for f in install.sh install.ps1 scripts/toggle-guard.sh scripts/toggle-guard.ps1; do
+          for f in install.sh install.ps1 scripts/toggle-guard.sh scripts/toggle-guard.ps1 scripts/toggle-cleanup.sh scripts/toggle-cleanup.ps1; do
             if [ -f "$GITHUB_WORKSPACE/$f" ]; then
               FILES+=("$GITHUB_WORKSPACE/$f")
             else
@@ -191,7 +219,7 @@ jobs:
             platform: windows-x64
     env:
       PLATFORM: ${{ matrix.platform }}
-      DOWNLOAD_BASE: https://github.com/${{ github.repository }}/releases/download/latest
+      DOWNLOAD_BASE: https://github.com/${{ github.repository }}/releases/download/${{ needs.detect.outputs.build_tag }}
       EXPECTED_VERSION: ${{ needs.detect.outputs.version }}
     defaults:
       run:

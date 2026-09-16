@@ -9,7 +9,8 @@
 #   TOGGLE_GUARD=0 ./install.sh           # no activar el guardián anti-borrado
 #
 # Si se encuentra un binario local (opencode-<platform>) al lado de install.sh
-# se usa primero; si no, se descarga del release "latest" del repo.
+# se usa primero; si no, se descarga del release versionado más nuevo (builds
+# únicas por tag, sin pisar assets — evita bins mezclados de la caché CDN).
 set -euo pipefail
 
 GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
@@ -37,6 +38,26 @@ if [[ "$PLATFORM" == unsupported:* ]]; then
 fi
 echo ">> Plataforma: $PLATFORM"
 
+# --- Resolver el release más nuevo (builds únicas, sin pisar assets) ----------
+# Cada build se publica en un release versionado único (toggle-X.Y.Z o
+# toggle-X.Y.Z-r<build>). Resolvemos el tag más reciente por API y descargamos
+# de ahí: como el contenido de cada URL nunca cambia, no hay mezcla de bins
+# viejos/nuevos en la caché del CDN (lo que sí ocurre con "latest", que se
+# sobrescribe en cada build).
+resolve_release_base() {
+  local tags t
+  tags="$(curl -fsSL --proto =https --tlsv1.2 \
+    "https://api.github.com/repos/$GH_REPO/releases?per_page=30" 2>/dev/null || true)"
+  t="$(printf '%s\n' "$tags" | grep -oE '"tag_name": ?"[^"]+"' | sed -E 's/.*": ?"([^"]+)".*/\1/' | grep '^toggle-' | head -n1)"
+  if [[ -n "$t" ]]; then
+    echo "https://github.com/$GH_REPO/releases/download/$t"
+  else
+    echo "https://github.com/$GH_REPO/releases/download/latest"
+  fi
+}
+RELEASE_BASE="$(resolve_release_base)"
+echo ">> Release: ${RELEASE_BASE#https://github.com/$GH_REPO/releases/download/}"
+
 # --- Obtener el binario -----------------------------------------------------
 BIN_SRC=""
 for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PLATFORM"; do
@@ -46,13 +67,13 @@ for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PL
   fi
 done
 if [[ -z "$BIN_SRC" ]]; then
-  URL="https://github.com/$GH_REPO/releases/download/latest/opencode-$PLATFORM"
+  URL="$RELEASE_BASE/opencode-$PLATFORM"
   echo ">> Descargando: $URL"
   BIN_SRC="$SCRIPT_DIR/.opencode-$PLATFORM.download"
   curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$BIN_SRC"
 
   # --- Verificación SHA256 ---------------------------------------------------
-  SHA_URL="https://github.com/$GH_REPO/releases/download/latest/SHA256SUMS"
+  SHA_URL="$RELEASE_BASE/SHA256SUMS"
   SHA_FILE="$SCRIPT_DIR/.opencode-sha256.download"
   echo ">> Verificando SHA256 contra $SHA_URL"
   if curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_FILE"; then
@@ -111,6 +132,30 @@ echo "$HASH_ACTUAL" > "$ORIG.sha256"
 echo ">> opencode con skill-toggle instalado: $ORIG"
 echo
 
+# --- Limpieza de residuos ------------------------------------------------------
+# Elimina backups y temporales de versiones anteriores al actualizar, para que
+# no se acumulen cientos de MB con cada versión. Conserva binario + marcador.
+#   - conserva un .bak de la anterior: TOGGLE_CLEANUP_KEEP_BACKUP=1
+#   - ensayo (solo listar):           TOGGLE_CLEANUP_DRY_RUN=1
+CLEANUP="$HOME/.opencode/toggle-cleanup.sh"
+if [[ -f "$SCRIPT_DIR/scripts/toggle-cleanup.sh" ]]; then
+  cp "$SCRIPT_DIR/scripts/toggle-cleanup.sh" "$CLEANUP"
+elif [[ ! -f "$CLEANUP" ]]; then
+  echo ">> Descargando toggle-cleanup.sh"
+  curl -fsSL --proto =https --tlsv1.2 \
+    "$RELEASE_BASE/toggle-cleanup.sh" \
+    -o "$CLEANUP" || rm -f "$CLEANUP"
+fi
+if [[ -f "$CLEANUP" ]]; then
+  chmod +x "$CLEANUP" 2>/dev/null || true
+  if bash "$CLEANUP"; then
+    echo ">> Residuos de versiones anteriores eliminados"
+  else
+    echo ">> Aviso: la limpieza de residuos no terminó bien; reintenta con: bash $CLEANUP" >&2
+  fi
+fi
+echo
+
 # --- Guardián anti-borrado ----------------------------------------------------
 # Si el installador oficial (autoupdate / "opencode upgrade") reemplaza el
 # binario, toggle-guard.sh lo restaura en segundo plano.
@@ -124,7 +169,7 @@ if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
   else
     echo ">> Descargando toggle-guard.sh"
     curl -fsSL --proto =https --tlsv1.2 \
-      "https://github.com/$GH_REPO/releases/download/latest/toggle-guard.sh" \
+      "$RELEASE_BASE/toggle-guard.sh" \
       -o "$GUARD"
   fi
   chmod +x "$GUARD" 2>/dev/null || true
@@ -225,5 +270,7 @@ Aviso importante:
     opencode.json desactiva el autoupdate oficial; ambas cosas se explican en
     el README, sección Actualizaciones.)
   - El reemplazo es atómico: puedes reinstalar incluso con opencode abierto.
+  - Limpieza automática de residuos al actualizar (elimina .bak y temporales de
+    versiones anteriores; conserva uno con TOGGLE_CLEANUP_KEEP_BACKUP=1).
   - Reinicia opencode para que el binario nuevo quede activo.
 EOF

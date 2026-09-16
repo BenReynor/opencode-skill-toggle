@@ -44,7 +44,24 @@ Write-Step "Plataforma: $Platform"
 # --- Obtener el binario -----------------------------------------------------
 $BinDir = Join-Path $HOME ".opencode\bin"
 $Final = Join-Path $BinDir "opencode.exe"
-$Url = "https://github.com/$Repo/releases/download/latest/opencode-$Platform"
+
+# Cada build se publica en un tag único (toggle-X.Y.Z o toggle-X.Y.Z-r<build>):
+# su contenido nunca cambia, así que la descarga nunca mezcla bins viejos de la
+# caché del CDN (lo que sí ocurre con "latest", que se sobrescribe).
+function Resolve-ReleaseBase {
+  $tag = "latest"
+  try {
+    $rels = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=30" `
+      -Headers @{ "User-Agent" = "opencode-skill-toggle" } -ErrorAction Stop
+    $t = $rels | Where-Object { $_.tag_name -like "toggle-*" } | Select-Object -First 1 -ExpandProperty tag_name
+    if ($t) { $tag = $t }
+  } catch { }
+  return "https://github.com/$Repo/releases/download/$tag"
+}
+$ReleaseBase = Resolve-ReleaseBase
+Write-Step "Release: $($ReleaseBase -replace '^.*/download/','')"
+
+$Url = "$ReleaseBase/opencode-$Platform"
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
@@ -58,7 +75,7 @@ if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
 }
 
 # --- Verificación SHA256 ----------------------------------------------------
-$ShaUrl = "https://github.com/$Repo/releases/download/latest/SHA256SUMS"
+$ShaUrl = "$ReleaseBase/SHA256SUMS"
 $ShaTmp = Join-Path $BinDir "opencode-sha256.download"
 Write-Step "Verificando SHA256 contra $ShaUrl"
 try {
@@ -104,6 +121,28 @@ Write-Step "Instalado: $Final"
 $ActualHash = (Get-FileHash -LiteralPath $Final -Algorithm SHA256).Hash.ToLower()
 Set-Content -LiteralPath "$Final.sha256" -Value $ActualHash -NoNewline
 
+# --- Limpieza de residuos ------------------------------------------------------
+# Elimina backups y temporales de versiones anteriores al actualizar.
+$Cleanup = Join-Path $HOME ".opencode\toggle-cleanup.ps1"
+if ($PSScriptRoot) {
+  $LocalCleanup = Join-Path $PSScriptRoot "scripts\toggle-cleanup.ps1"
+  if (Test-Path -LiteralPath $LocalCleanup) {
+    Copy-Item -LiteralPath $LocalCleanup -Destination $Cleanup -Force
+  }
+}
+if (-not (Test-Path -LiteralPath $Cleanup)) {
+  Write-Step "Descargando toggle-cleanup.ps1"
+  Invoke-WebRequest -Uri "$ReleaseBase/toggle-cleanup.ps1" -OutFile $Cleanup -UseBasicParsing -ErrorAction SilentlyContinue
+}
+if (Test-Path -LiteralPath $Cleanup) {
+  try {
+    & $Cleanup
+    Write-Step "Residuos de versiones anteriores eliminados"
+  } catch {
+    Write-Warning "La limpieza de residuos no terminó bien; reintenta con: powershell -File `"$Cleanup`""
+  }
+}
+
 # --- Guardián anti-borrado (Task Scheduler) --------------------------------
 if ($env:TOGGLE_GUARD -ne "0") {
   $Guard = Join-Path $HOME ".opencode\toggle-guard.ps1"
@@ -113,11 +152,11 @@ if ($env:TOGGLE_GUARD -ne "0") {
       Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
     } else {
       Write-Step "Descargando toggle-guard.ps1"
-      Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/latest/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
+      Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
     }
   } else {
     Write-Step "Descargando toggle-guard.ps1"
-    Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/latest/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
+    Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
   }
 
   $TaskName = "opencode-skill-toggle-guard"
@@ -150,6 +189,8 @@ Aviso importante:
     actualización oficial lo reemplaza. (Alternativa: "autoupdate": false en
     opencode.json desactiva el autoupdate oficial; ver README / Actualizaciones.)
   - Al ser un binario sin firma, Windows SmartScreen puede mostrarte un aviso
-    la primera vez: pulsa "Más información" > "Ejecutar de todas formas".
+      la primera vez: pulsa "Más información" > "Ejecutar de todas formas".
+  - Limpieza automática de residuos al actualizar (elimina .bak y temporales
+      de versiones anteriores; conserva uno con TOGGLE_CLEANUP_KEEP_BACKUP=1).
   - Reinicia opencode para que el binario nuevo quede activo.
 "@

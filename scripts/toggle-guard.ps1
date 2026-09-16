@@ -4,7 +4,7 @@
 
   Si opencode.exe fue reemplazado (por el autoupdate oficial o por una
   instalación manual del binario limpio), reinstala la build con skill-toggle
-  descargándola de GitHub Releases/latest y verificando el SHA256.
+  descargándola del release versionado más nuevo y verificando el SHA256.
 
   Lo lanza un Scheduled Task creado por install.ps1 (cada 15 min y al iniciar
   sesión). Puedes ejecutarlo a mano:
@@ -21,6 +21,34 @@ $Bin = Join-Path $HOME ".opencode\bin\opencode.exe"
 $Marker = "$Bin.sha256"
 $Log = if ($env:TOGGLE_GUARD_LOG) { $env:TOGGLE_GUARD_LOG } else { Join-Path $HOME ".opencode\toggle-guard.log" }
 $Platform = "windows-x64"
+$TagCache = Join-Path $HOME ".opencode\.toggle-guard-tag"
+
+# Cada build se publica en un tag único (toggle-X.Y.Z o toggle-X.Y.Z-r<build>):
+# su contenido nunca cambia, así que la descarga nunca mezcla bins viejos del
+# CDN (lo que sí ocurriría con "latest", que se sobrescribe). Resolución con
+# caché de 6 horas para no agotar el rate limit de la API.
+function Resolve-ReleaseBase {
+  $tag = "latest"
+  try {
+    if (Test-Path -LiteralPath $TagCache) {
+      $age = (Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $TagCache).LastWriteTimeUtc
+      if ($age.TotalMinutes -lt 360) {
+        $cached = (Get-Content -LiteralPath $TagCache -Raw).Trim()
+        if ($cached) { return "https://github.com/$Repo/releases/download/$($cached)" }
+      }
+    }
+    $rels = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=30" `
+      -Headers @{ "User-Agent" = "opencode-skill-toggle" } -ErrorAction Stop
+    $t = $rels | Where-Object { $_.tag_name -like "toggle-*" } | Select-Object -First 1 -ExpandProperty tag_name
+    if ($t) {
+      $tag = $t
+      Set-Content -LiteralPath $TagCache -Value $tag -NoNewline -ErrorAction SilentlyContinue
+    }
+  } catch { }
+  return "https://github.com/$Repo/releases/download/$tag"
+}
+
+$ReleaseBase = Resolve-ReleaseBase
 
 function Guard-Log([string]$Msg) {
   $Line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Msg
@@ -40,8 +68,8 @@ $Tmp = Join-Path $env:TEMP "opencode-toggle.download"
 $ShaTmp = Join-Path $env:TEMP "opencode-toggle.sha"
 
 try {
-  Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/latest/opencode-$Platform" -OutFile $Tmp -UseBasicParsing
-  Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/latest/SHA256SUMS" -OutFile $ShaTmp -UseBasicParsing
+  Invoke-WebRequest -Uri "$ReleaseBase/opencode-$Platform" -OutFile $Tmp -UseBasicParsing
+  Invoke-WebRequest -Uri "$ReleaseBase/SHA256SUMS" -OutFile $ShaTmp -UseBasicParsing
 
   $ExpectedLine = Get-Content -LiteralPath $ShaTmp | Where-Object { $_ -match "(?i)opencode-$Platform\s*$" } | Select-Object -First 1
   if (-not $ExpectedLine) {
@@ -75,6 +103,12 @@ try {
 
   Set-Content -LiteralPath $Marker -Value $Actual -NoNewline
   Guard-Log "skill-toggle reinstalado OK ($Platform, sha256 $Actual)"
+
+  # Limpieza de residuos de versiones anteriores (backups .bak / temporales).
+  $Cleanup = Join-Path $HOME ".opencode\toggle-cleanup.ps1"
+  if (Test-Path -LiteralPath $Cleanup) {
+    & $Cleanup | Out-Null
+  }
 } finally {
   Remove-Item -LiteralPath $ShaTmp -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $Tmp -Force -ErrorAction SilentlyContinue

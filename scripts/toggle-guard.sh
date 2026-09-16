@@ -4,8 +4,8 @@
 #
 # Si el binario de opencode fue reemplazado (por el autoupdate oficial,
 # por "opencode upgrade" o por cualquier otro medio), reinstala en segundo
-# plano la build con skill-toggle descargándola desde GitHub Releases/latest
-# y verificando el SHA256 contra SHA256SUMS.
+# plano la build con skill-toggle descargándola del release versionado más
+# nuevo (tag único por build) y verificando el SHA256 contra SHA256SUMS.
 #
 # Llámalo periódicamente (systemd .path/.timer, cron, launchd, Task Scheduler…):
 #   bash toggle-guard.sh
@@ -28,8 +28,32 @@ BIN="${TOGGLE_GUARD_BIN:-$HOME/.opencode/bin/opencode}"
 MARKER="$BIN.sha256"
 LOG="${TOGGLE_GUARD_LOG:-$HOME/.opencode/toggle-guard.log}"
 LOCK="/tmp/opencode-toggle-guard.lock"
+TAG_CACHE="$HOME/.opencode/.toggle-guard-tag"
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+
+# --- Resolver el release versionado más nuevo (con caché de 6 h) -------------
+# Cada build se publica en un tag único (toggle-X.Y.Z o toggle-X.Y.Z-r<build>):
+# su contenido nunca cambia, así que la descarga nunca mezcla bins viejos del
+# CDN (como pasaría con "latest", que se sobrescribe en cada build).
+resolve_release_base() {
+  if [[ -f "$TAG_CACHE" ]] && find "$TAG_CACHE" -mmin -360 >/dev/null 2>&1; then
+    local cached
+    cached="$(cat "$TAG_CACHE")"
+    [[ -n "$cached" ]] && { echo "https://github.com/$GH_REPO/releases/download/$cached"; return; }
+  fi
+  local tags t
+  tags="$(curl -fsSL --proto =https --tlsv1.2 \
+    "https://api.github.com/repos/$GH_REPO/releases?per_page=30" 2>/dev/null || true)"
+  t="$(printf '%s\n' "$tags" | grep -oE '"tag_name": ?"[^"]+"' | sed -E 's/.*": ?"([^"]+)".*/\1/' | grep '^toggle-' | head -n1)"
+  if [[ -n "$t" ]]; then
+    mkdir -p "$(dirname "$TAG_CACHE")"
+    printf '%s\n' "$t" > "$TAG_CACHE"
+    echo "https://github.com/$GH_REPO/releases/download/$t"
+  else
+    echo "https://github.com/$GH_REPO/releases/download/latest"
+  fi
+}
 
 # No dejes dos reinstalaciones a la vez.
 if command -v flock >/dev/null 2>&1; then
@@ -79,13 +103,15 @@ SHA_TMP="$(mktemp)"
 cleanup() { rm -f "$TMP" "$SHA_TMP"; }
 trap cleanup EXIT
 
-URL="https://github.com/$GH_REPO/releases/download/latest/opencode-$PLATFORM"
+RELEASE_BASE="$(resolve_release_base)"
+
+URL="$RELEASE_BASE/opencode-$PLATFORM"
 if ! curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$TMP"; then
   log "ERROR: no se pudo descargar $URL"
   exit 1
 fi
 
-SHA_URL="https://github.com/$GH_REPO/releases/download/latest/SHA256SUMS"
+SHA_URL="$RELEASE_BASE/SHA256SUMS"
 if ! curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_TMP"; then
   log "ERROR: no se pudo descargar $SHA_URL"
   exit 1
@@ -107,3 +133,9 @@ chmod +x "$TMP"
 mv -f "$TMP" "$BIN"                      # atómico: funciona aun con opencode corriendo
 echo "$ACTUAL" > "$MARKER"
 log "skill-toggle reinstalado OK ($PLATFORM, sha256 $ACTUAL)"
+
+# Limpieza de residuos de versiones anteriores (backups .bak / temporales).
+CLEANUP="$HOME/.opencode/toggle-cleanup.sh"
+if [[ -f "$CLEANUP" ]]; then
+  bash "$CLEANUP" >/dev/null 2>&1 || true
+fi

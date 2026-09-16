@@ -142,8 +142,14 @@ El diálogo `/skill-toggle` de la interfaz hace exactamente lo mismo.
 ## 🔄 Actualizaciones
 
 Este repositorio se reconstruye solo: cuando opencode publica una versión nueva,
-se compila de nuevo con el interruptor y se publica en `latest`. Así siempre
-tienes lo último **con** el toggle.
+se compila de nuevo con el interruptor y se publica en un release versionado.
+Así siempre tienes lo último **con** el toggle.
+
+> Cada build se publica en un **tag único** (`toggle-<versión>` o
+> `toggle-<versión>-r<build>`): el contenido de cada release nunca cambia, con lo
+> que instaladores y guardián descargan siempre el binario correcto sin riesgo de
+> mezclar copias viejas/nuevas en la caché de GitHub (los sockets de instalador
+> y guardián resuelven el tag `toggle-*` más reciente por la API de GitHub).
 
 La actualización oficial reemplaza `~/.opencode/bin/opencode` (o `opencode.exe`)
 por el binario limpio. Para que el toggle nunca se pierda, el instalador deja
@@ -157,8 +163,8 @@ Restaura el toggle solo, en segundo plano, si el binario fue reemplazado:
   (un `opencode.sha256` junto al binario).
 - El guardián (`toggle-guard.sh` en Linux/macOS, `toggle-guard.ps1` en Windows)
   compara ese marcador con el binario actual; si difiere, descarga la build con
-  toggle de `latest`, **verifica su SHA256** y la reinstala (reemplazo atómico,
-  sin cortar lo que esté en marcha).
+  toggle del release versionado más nuevo, **verifica su SHA256** y la reinstala
+  (reemplazo atómico, sin cortar lo que esté en marcha).
 - Qué lo dispara según el sistema:
 
   | Sistema | Mecanismo |
@@ -192,6 +198,26 @@ TOGGLE_GUARD=0 ./install.sh
 
 Log de actividad: `~/.opencode/toggle-guard.log`.
 
+### 🧹 Limpieza automática de residuos
+
+Con cada instalación/restauración se eliminan los restos de versiones anteriores
+(`~/.opencode/bin/opencode.bak`, `opencode.<version>.bak`, temporales
+`*.download`/`*.tmp`), para que no se acumulen cientos de MB. Solo se conservan
+el binario activo y su marcador `opencode.sha256`.
+
+```bash
+# ejecutar la limpieza a mano (ensayo y ejecución real)
+TOGGLE_CLEANUP_DRY_RUN=1 bash ~/.opencode/toggle-cleanup.sh   # solo lista
+bash ~/.opencode/toggle-cleanup.sh                            # ejecuta
+
+# conservar un único .bak de la versión anterior
+TOGGLE_CLEANUP_KEEP_BACKUP=1 bash ~/.opencode/toggle-cleanup.sh
+```
+
+El instalador y el guardián la ejecutan automáticamente en las tres plataformas
+(`toggle-cleanup.sh` en Linux/macOS, `toggle-cleanup.ps1` en Windows).
+Log: `~/.opencode/toggle-cleanup.log`.
+
 **Opción alternativa — desactivar el autoupdate oficial**
 
 Si prefieres que el instalador oficial jamás toque tu binario (con esto el
@@ -205,7 +231,7 @@ guardián ya no es necesario, aunque tampoco estorba), desactiva el autoupdate e
 ```
 
 Para actualizar entonces, vuelve a ejecutar el comando de instalación:
-descargará la última build con toggle desde nuestro release `latest`.
+descargará la última build con toggle del release versionado más nuevo.
 
 ---
 
