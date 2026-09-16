@@ -651,7 +651,7 @@ new file mode 100644
 index 0000000..9fc43e2
 --- /dev/null
 +++ b/packages/tui/src/component/dialog-skill-toggle.tsx
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,88 @@
 +import { createMemo, createSignal } from "solid-js"
 +import { useLocal } from "../context/local"
 +import { useSync } from "../context/sync"
@@ -684,7 +684,6 @@ index 0000000..9fc43e2
 +  const options = createMemo(() => {
 +    const skillData = sync.data.skill
 +    const loadingSkill = loading()
-+    const activeSkill = active()
 +
 +    return pipe(
 +      skillData ?? {},
@@ -695,7 +694,7 @@ index 0000000..9fc43e2
 +        title: name,
 +        description: enabled ? "active" : "inactive",
 +        footer: (
-+          <Status enabled={local.skill.isEnabled(name)} loading={loadingSkill === name} active={activeSkill === name} />
++          <Status enabled={local.skill.isEnabled(name)} loading={loadingSkill === name} active={active() === name} />
 +        ),
 +        category: undefined,
 +      })),
