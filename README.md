@@ -22,6 +22,7 @@ rechazan si alguien intenta pedirlas.
 | 🚫 | Si pides una skill desactivada, **se rechaza** limpiamente |
 | 🧠 | Tu elección **se guarda en disco** y sobrevive a los reinicios |
 | 💾 | Usa la misma base de datos: **no pierdes conversaciones ni ajustes** |
+| 🛡️ | Guardián opcional que restaura el toggle si la actualización oficial lo pisa |
 | 🖥️ | Funciona en **Linux, macOS y Windows** (CLI de terminal) |
 
 ---
@@ -44,6 +45,10 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 > SHA256** y crea una copia de seguridad de la instalación anterior. El reemplazo
 > es **atómico**: puedes reinstalar incluso con opencode abierto (el proceso en
 > marcha conserva su binario viejo; las sesiones nuevas usan el nuevo).
+>
+> En **Linux con systemd**, además queda activo por defecto el 🛡️ **guardián
+> anti-borrado**: si el autoupdate oficial reemplaza tu binario, el toggle se
+> restaura solo en segundo plano (desactivable con `TOGGLE_GUARD=0`).
 
 ### 📦 Manual
 
@@ -89,6 +94,9 @@ Para que el instalador oficial no reemplace esta versión, añade a `opencode.js
 
 Reinicia opencode cuando termines. ✅
 
+> 🛡️ **Otra vía**: prefiere mantener el autoupdate oficial y dejar que el
+> guardián anti-borrado (sección más abajo) restaure el toggle solo.
+
 ---
 
 ## 🕹️ Cómo se usa
@@ -105,6 +113,19 @@ Selecciona la skill que quieras y actívala o desactívala:
 - ⭕ **Disabled** — la skill está desactivada; no se carga ni se puede pedir.
 
 Tu elección se guarda al instante en disco y se mantiene al reiniciar. 🔁
+
+### 🔌 Estado desde la API (avanzado)
+
+Si ejecutas `opencode serve`, el toggle también es consultable vía HTTP, útil
+para scripts y CI:
+
+| Endpoint | Método | Efecto |
+|----------|--------|--------|
+| `/skill/status` | GET | Estado de cada skill (enabled/disabled) |
+| `/skill/:name/enable` | POST | Activa la skill al instante |
+| `/skill/:name/disable` | POST | La desactiva al instante y persiste |
+
+El diálogo `/skill-toggle` de la interfaz hace exactamente lo mismo.
 
 ---
 
@@ -124,6 +145,16 @@ Tu elección se guarda al instante en disco y se mantiene al reiniciar. 🔁
 - **¿Puedo desactivar todas las skills?**
   Sí, cada skill se gestiona de forma independiente. Puedes dejarlas todas
   apagadas o solo las que no uses.
+
+- **¿El guardián anti-borrado deja un proceso en segundo plano de espera?**
+  No. No hay ningún daemon propio: lo vigila el `systemd --user` que ya corre en
+  tu sesión (inotify + un timer). Solo se lanza `toggle-guard.sh` un instante
+  cuando el binario cambia — y si no hay nada que hacer, sale en milisegundos.
+
+- **¿El guardián funciona también en macOS / Windows?**
+  Todavía no: el guardián automático está disponible en **Linux con systemd**.
+  macOS (launchd) y Windows (Task Scheduler) pueden usar el mismo
+  `toggle-guard.sh`, aún por integrar en el instalador.
 
 ---
 
@@ -146,19 +177,25 @@ tienes lo último **con** el toggle, sin hacer nada.
 > mismo toggle a las versiones nuevas, así que actualizar desde este repo no
 > pierde nada.
 
-### 🛡️ Guardián anti-borrado (opcional, Linux)
+### 🛡️ Guardián anti-borrado (Linux)
 
 ¿Prefieres **mantener el autoupdate oficial** y que el toggle se restaure solo?
-El instalador (`install.sh`) puede dejar activo un guardián en segundo plano:
+El instalador activa por defecto un guardián basado en `systemd --user`:
 
-- Marca el **SHA-256** del binario con toggle recién instalado.
-- Un `opencode-toggle-guard.sh` se dispara automáticamente (systemd `--user`,
-  `.path` + `.timer` cada 15 min) cuando el binario cambia.
+- Tras instalar deja un **marcador** con el SHA-256 del binario con toggle
+  (`~/.opencode/bin/opencode.sha256`).
+- `~/.opencode/toggle-guard.sh` se dispara cuando el binario cambia (`.path` con
+  inotify del kernel + `.timer` de respaldo cada 15 min).
 - Si el autoupdate oficial o `opencode upgrade` reemplazan tu binario, el
   guardián descarga la build con toggle de `latest`, **verifica su SHA256** y la
   restaura al instante (reemplazo atómico, sin cortar lo que esté en marcha).
 
-Viene activado por defecto al instalar en Linux con systemd. Se desactiva con:
+> **No deja ningún proceso en espera.** No existe un daemon propio: lo vigila el
+> propio `systemd --user` (ya residente en tu sesión) con inotify + un timer, y
+> solo ejecuta el script un instante cuando hay que actuar. Si no hay nada que
+> hacer, el chequeo dura milisegundos.
+
+Se desactiva con:
 
 ```bash
 TOGGLE_GUARD=0 ./install.sh        # no instalar el guardián
