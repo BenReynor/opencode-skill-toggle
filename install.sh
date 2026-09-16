@@ -6,6 +6,7 @@
 #   ./install.sh                          # usa el binario junto a este script, o
 #                                         # descarga de GitHub Releases/latest
 #   GH_REPO=tudusuario/opencode-skill-toggle ./install.sh
+#   TOGGLE_GUARD=0 ./install.sh           # no activar el guardián anti-borrado
 #
 # Si se encuentra un binario local (opencode-<platform>) al lado de install.sh
 # se usa primero; si no, se descarga del release "latest" del repo.
@@ -98,8 +99,84 @@ cp "$BIN_SRC" "$TMP"
 chmod +x "$TMP"
 mv -f "$TMP" "$ORIG"
 rm -f "$SCRIPT_DIR/.opencode-$PLATFORM.download"
+
+# Marcador para el guardián: hash del binario con toggle recién instalado.
+if command -v sha256sum >/dev/null 2>&1; then
+  HASH_ACTUAL="$(sha256sum "$BIN_SRC" | awk '{print $1}')"
+else
+  HASH_ACTUAL="$(shasum -a 256 "$BIN_SRC" | awk '{print $1}')"
+fi
+echo "$HASH_ACTUAL" > "$ORIG.sha256"
+
 echo ">> opencode con skill-toggle instalado: $ORIG"
 echo
+
+# --- Guardián anti-borrado (opcional, Linux con systemd) ---------------------
+# Si el installador oficial (autoupdate / "opencode upgrade") reemplaza el
+# binario, toggle-guard.sh lo restaura en segundo plano.
+if [[ "${TOGGLE_GUARD:-1}" == "1" ]] && command -v systemctl >/dev/null 2>&1 \
+   && [[ "$(uname -s)" == "Linux" ]]; then
+  GUARD="$HOME/.opencode/toggle-guard.sh"
+  if [[ -f "$SCRIPT_DIR/scripts/toggle-guard.sh" ]]; then
+    cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
+  else
+    echo ">> Descargando toggle-guard.sh"
+    curl -fsSL --proto =https --tlsv1.2 \
+      "https://github.com/$GH_REPO/releases/download/latest/toggle-guard.sh" \
+      -o "$GUARD"
+  fi
+  chmod +x "$GUARD"
+
+  UDIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  mkdir -p "$UDIR"
+
+  cat > "$UDIR/opencode-toggle-guard.path" <<EOF
+[Unit]
+Description=Detecta cambios en el binario de opencode (skill-toggle)
+
+[Path]
+PathChanged=%h/.opencode/bin/opencode
+Unit=opencode-toggle-guard.service
+
+[Install]
+WantedBy=default.target
+EOF
+
+  cat > "$UDIR/opencode-toggle-guard.service" <<EOF
+[Unit]
+Description=Reinstala el skill-toggle si el binario de opencode fue reemplazado
+
+[Service]
+Type=oneshot
+ExecStart=%h/.opencode/toggle-guard.sh
+EOF
+
+  cat > "$UDIR/opencode-toggle-guard.timer" <<EOF
+[Unit]
+Description=Copia de seguridad del skill-toggle (cada 15 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=default.target
+EOF
+
+  if systemctl --user daemon-reload 2>/dev/null; then
+    systemctl --user enable --now opencode-toggle-guard.path \
+      opencode-toggle-guard.timer >/dev/null 2>&1 || true
+    systemctl --user start opencode-toggle-guard.service >/dev/null 2>&1 || true
+    echo ">> Guardián anti-borrado activado (systemd --user):"
+    echo ">>   - reinstala el toggle si el autoupdate oficial lo reemplaza"
+    echo ">>   - log: $HOME/.opencode/toggle-guard.log"
+    echo ">>   - desactivar: TOGGLE_GUARD=0 $0  y  systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer"
+  else
+    echo ">> Aviso: systemd --user no disponible; guardián instalado pero sin activar" >&2
+  fi
+else
+  echo ">> Guardián anti-borrado no instalado (TOGGLE_GUARD=0 o sin systemd)"
+fi
 
 cat <<'EOF'
 Aviso importante:

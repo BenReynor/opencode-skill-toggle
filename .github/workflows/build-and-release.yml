@@ -156,7 +156,7 @@ jobs:
       - name: Copiar installers al release latest
         run: |
           FILES=()
-          for f in install.sh install.ps1; do
+          for f in install.sh install.ps1 scripts/toggle-guard.sh; do
             if [ -f "$GITHUB_WORKSPACE/$f" ]; then
               FILES+=("$GITHUB_WORKSPACE/$f")
             else

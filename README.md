@@ -146,6 +146,27 @@ tienes lo último **con** el toggle, sin hacer nada.
 > mismo toggle a las versiones nuevas, así que actualizar desde este repo no
 > pierde nada.
 
+### 🛡️ Guardián anti-borrado (opcional, Linux)
+
+¿Prefieres **mantener el autoupdate oficial** y que el toggle se restaure solo?
+El instalador (`install.sh`) puede dejar activo un guardián en segundo plano:
+
+- Marca el **SHA-256** del binario con toggle recién instalado.
+- Un `opencode-toggle-guard.sh` se dispara automáticamente (systemd `--user`,
+  `.path` + `.timer` cada 15 min) cuando el binario cambia.
+- Si el autoupdate oficial o `opencode upgrade` reemplazan tu binario, el
+  guardián descarga la build con toggle de `latest`, **verifica su SHA256** y la
+  restaura al instante (reemplazo atómico, sin cortar lo que esté en marcha).
+
+Viene activado por defecto al instalar en Linux con systemd. Se desactiva con:
+
+```bash
+TOGGLE_GUARD=0 ./install.sh        # no instalar el guardián
+systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer
+```
+
+Log de actividad: `~/.opencode/toggle-guard.log`.
+
 ---
 
 ## 🔒 Seguridad
