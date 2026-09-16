@@ -102,9 +102,9 @@ rm -f "$SCRIPT_DIR/.opencode-$PLATFORM.download"
 
 # Marcador para el guardián: hash del binario con toggle recién instalado.
 if command -v sha256sum >/dev/null 2>&1; then
-  HASH_ACTUAL="$(sha256sum "$BIN_SRC" | awk '{print $1}')"
+  HASH_ACTUAL="$(sha256sum "$ORIG" | awk '{print $1}')"
 else
-  HASH_ACTUAL="$(shasum -a 256 "$BIN_SRC" | awk '{print $1}')"
+  HASH_ACTUAL="$(shasum -a 256 "$ORIG" | awk '{print $1}')"
 fi
 echo "$HASH_ACTUAL" > "$ORIG.sha256"
 
