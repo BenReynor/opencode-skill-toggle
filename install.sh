@@ -13,7 +13,7 @@ set -euo pipefail
 
 GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
 ORIG="$HOME/.opencode/bin/opencode"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd 2>/dev/null || echo "$PWD")"
 
 # --- Detectar plataforma ----------------------------------------------------
 detect_platform() {
@@ -90,8 +90,13 @@ elif [[ -f "$ORIG" ]]; then
 fi
 
 # --- Instalar ---------------------------------------------------------------
-chmod +x "$BIN_SRC"
-cp "$BIN_SRC" "$ORIG"
+# Reemplazo atómico (mv): no falla con "Text file busy" aunque opencode esté
+# en ejecución. El proceso en marcha conserva su inode viejo y las sesiones
+# nuevas usan el binario nuevo.
+TMP="$ORIG.tmp.$$"
+cp "$BIN_SRC" "$TMP"
+chmod +x "$TMP"
+mv -f "$TMP" "$ORIG"
 rm -f "$SCRIPT_DIR/.opencode-$PLATFORM.download"
 echo ">> opencode con skill-toggle instalado: $ORIG"
 echo
@@ -100,7 +105,9 @@ cat <<'EOF'
 Aviso importante:
   - Esta es una build personalizada (no oficial). Mantiene tu opencode.db real.
   - Al descargar de GitHub Releases, el binario se verifica contra SHA256SUMS.
-  - Configura "autoupdate": false en opencode.json para que no la reemplace
-    el instalador oficial.
+  - Configura "autoupdate": false en opencode.json para que el instalador
+    oficial no la reemplace al actualizar (este repo reconstruye la build con
+    cada versión nueva de upstream; actualizar = volver a correr este script).
+  - El reemplazo es atómico: puedes reinstalar incluso con opencode abierto.
   - Reinicia opencode para que el binario nuevo quede activo.
 EOF

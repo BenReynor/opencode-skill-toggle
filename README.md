@@ -41,7 +41,9 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 ```
 
 > El instalador detecta tu plataforma, descarga el binario adecuado, **verifica su
-> SHA256** y crea una copia de seguridad de la instalación anterior.
+> SHA256** y crea una copia de seguridad de la instalación anterior. El reemplazo
+> es **atómico**: puedes reinstalar incluso con opencode abierto (el proceso en
+> marcha conserva su binario viejo; las sesiones nuevas usan el nuevo).
 
 ### 📦 Manual
 
@@ -130,6 +132,19 @@ Tu elección se guarda al instante en disco y se mantiene al reiniciar. 🔁
 Este repositorio se revisa automáticamente: cuando opencode publica una versión
 nueva, se compila de nuevo con el interruptor y se publica aquí. Así siempre
 tienes lo último **con** el toggle, sin hacer nada.
+
+¿Cómo evitas que la actualización oficial **borre** tu toggle?
+
+1. **`autoupdate: false`** en `opencode.json` (sección de arriba). El instalador
+   oficial ya no sobreescribirá tu binario.
+2. **Para actualizar de verdad**, vuelve a ejecutar el mismo comando de
+   instalación: descarga la última build con toggle desde nuestro release
+   `latest`. Es lo único que necesitas recordar.
+
+> El comando oficial `opencode upgrade` sí reemplaza `~/.opencode/bin/opencode`
+> por el binario oficial limpio; por eso se desactiva. Nuestra build aplica el
+> mismo toggle a las versiones nuevas, así que actualizar desde este repo no
+> pierde nada.
 
 ---
 
