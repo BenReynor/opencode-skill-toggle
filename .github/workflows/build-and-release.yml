@@ -149,9 +149,9 @@ jobs:
               --title "opencode $VERSION + skill-toggle ($BUILD_TAG)" \
               --notes "Build custom de opencode **$VERSION** con el toggle de skills persistente.
 
-Release de build **único** (nunca se sobrescribe): el instalador y el guardián resuelven el tag **$BUILD_TAG** (o el más reciente \`toggle-*\`) por la API para descargar siempre el binario correcto.
+              Release de build **único** (nunca se sobrescribe): el instalador y el guardián resuelven el tag **$BUILD_TAG** (o el más reciente \`toggle-*\`) por la API para descargar siempre el binario correcto.
 
-Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows). Verifica el SHA256 de tu binario con SHA256SUMS."
+              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows). Verifica el SHA256 de tu binario con SHA256SUMS."
           fi
 
       - name: Publish rolling "latest" assets (+ SHA256SUMS)
