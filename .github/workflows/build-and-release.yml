@@ -200,7 +200,7 @@ jobs:
   smoke:
     name: Smoke ${{ matrix.platform }}
     needs: [detect, build]
-    if: ${{ always() && needs.detect.result == 'success' && needs.build.result != 'failure' }}
+    if: ${{ always() && needs.detect.result == 'success' && needs.build.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
