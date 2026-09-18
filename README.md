@@ -2,227 +2,227 @@
 
 ![CI](https://github.com/BenReynor/opencode-skill-toggle/actions/workflows/build-and-release.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/BenReynor/opencode-skill-toggle)
-![Plataformas](https://img.shields.io/badge/plataformas-Linux%20·%20macOS%20·%20Windows-informational)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20·%20macOS%20·%20Windows-informational)
 
-> 🎚️ **opencode con un interruptor para cada skill.** Activa o desactiva las
-> skills por separado y él **recuerda tu decisión** entre reinicios.
+> 🎚️ **opencode with a toggle for every skill.** Enable or disable each skill
+> independently and it **remembers your choice** between restarts.
 
-Mantén instaladas todas las skills que quieras, pero solo se cargan las que tienes
-**activadas**. Las desactivadas dejan de saturar las sugerencias del modelo y se
-rechazan si alguien intenta pedirlas.
+Keep all the skills you want installed, but only the ones you have **enabled**
+are actually loaded. Disabled skills stop cluttering the model's suggestions and
+are rejected if someone tries to invoke them.
 
 ---
 
-## 🚀 Qué hace
+## 🚀 What it does
 
-| Emoji | Función |
+| Emoji | Feature |
 |-------|---------|
-| 🎚️ | Enciende y apaga **cada skill por separado** |
-| 🧹 | Las skills desactivadas **desaparecen del entorno del modelo** |
-| 🚫 | Si pides una skill desactivada, **se rechaza** limpiamente |
-| 🧠 | Tu elección **se guarda en disco** y sobrevive a los reinicios |
-| 💾 | Usa la misma base de datos: **no pierdes conversaciones ni ajustes** |
-| 🛡️ | Guardián que restaura el toggle si la actualización oficial lo pisa (Linux · macOS · Windows) |
-| 🖥️ | Funciona en **Linux, macOS y Windows** (CLI de terminal) |
+| 🎚️ | Turns **each skill on and off independently** |
+| 🧹 | Disabled skills **disappear from the model's environment** |
+| 🚫 | Asking for a disabled skill **is rejected** cleanly |
+| 🧠 | Your choice **is saved to disk** and survives restarts |
+| 💾 | Uses the same database: **no lost conversations or settings** |
+| 🛡️ | Guard that restores the toggle if the official update overwrites it (Linux · macOS · Windows) |
+| 🖥️ | Works on **Linux, macOS and Windows** (CLI) |
 
 ---
 
-## 📥 Instalación
+## 📥 Installation
 
-### 🟢 Linux / macOS — un solo comando
+### 🟢 Linux / macOS — a single command
 
 ```bash
 curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.sh | bash
 ```
 
-### 🔵 Windows — un solo comando (PowerShell)
+### 🔵 Windows — a single command (PowerShell)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.ps1 | iex"
 ```
 
-> El instalador detecta tu plataforma, descarga el binario adecuado, **verifica su
-> SHA256** y crea una copia de seguridad de la instalación anterior. El reemplazo
-> es **atómico**: puedes reinstalar incluso con opencode abierto (el proceso en
-> marcha conserva su binario viejo; las sesiones nuevas usan el nuevo).
+> The installer detects your platform, downloads the proper binary, **verifies its
+> SHA256** and makes a backup of the previous installation. The replacement is
+> **atomic**: you can reinstall even while opencode is running (the running process
+> keeps its old binary; new sessions use the new one).
 >
-> En **Linux, macOS y Windows** el instalador deja activo por defecto el 🛡️
-> **guardián anti-borrado** (systemd / launchd / Task Scheduler): si el autoupdate
-> oficial reemplaza tu binario, el toggle se restaura solo en segundo plano
-> (desactivable con `TOGGLE_GUARD=0`).
+> On **Linux, macOS and Windows** the installer leaves the 🛡️ **anti-overwrite
+> guard** enabled by default (systemd / launchd / Task Scheduler): if the official
+> autoupdate replaces your binary, the toggle is restored automatically in the
+> background (disable it with `TOGGLE_GUARD=0`).
 
-### 📦 Manual
+### 📦 Manual install
 
-1. Ve a [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases).
-2. Descarga tu binario:
+1. Go to [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases).
+2. Download your binary:
 
-   | Sistema | Archivo |
+   | System | File |
    |---------|---------|
    | 🐧 Linux x64 | `opencode-linux-x64` |
    | 🐧 Linux ARM | `opencode-linux-arm64` |
    | 🐧 Linux musl | `opencode-linux-*-musl` |
-   | 🐧 Linux CPUs antiguas | `opencode-linux-x64-baseline` |
+   | 🐧 Old Linux CPUs | `opencode-linux-x64-baseline` |
    | 🍎 macOS Intel | `opencode-darwin-x64` |
    | 🍎 macOS Apple Silicon | `opencode-darwin-arm64` |
    | 🪟 Windows x64 | `opencode-windows-x64` |
 
-3. Sustituye el binario de opencode:
-   - **Linux/macOS**: `~/.opencode/bin/opencode` (recuerda `chmod +x`).
+3. Replace the opencode binary:
+   - **Linux/macOS**: `~/.opencode/bin/opencode` (remember `chmod +x`).
    - **Windows**: `%USERPROFILE%\.opencode\bin\opencode.exe`.
-4. Opcional: guarda antes una copia del anterior.
+4. Optional: keep a copy of the previous one before replacing.
 
-> **🔓 Binarios sin firmar**: en macOS, Gatekeeper puede bloquear la primera
-> ejecución (_clic derecho > Abrir_ o `xattr -dr com.apple.quarantine opencode`).
-> En Windows, SmartScreen avisará la primera vez (_Más información > Ejecutar de
-> todas formas_).
+> **🔓 Unsigned binaries**: on macOS, Gatekeeper may block the first run
+> (_right-click > Open_ or `xattr -dr com.apple.quarantine opencode`). On Windows,
+> SmartScreen will warn the first time (_More info > Run anyway_).
 
-### 🤔 ¿Qué binario Linux elijo?
+### 🤔 Which Linux binary should I pick?
 
-- **`linux-x64` / `linux-arm64`** — la mayoría de distros (glibc): Ubuntu, Debian,
-  Fedora, Arch, Mint…
-- **`linux-x64-musl` / `linux-arm64-musl`** — distros con **musl** (p. ej. Alpine).
-- **`linux-x64-baseline`** — CPUs muy antiguas **sin AVX2**.
+- **`linux-x64` / `linux-arm64`** — most distros (glibc): Ubuntu, Debian, Fedora,
+  Arch, Mint…
+- **`linux-x64-musl` / `linux-arm64-musl`** — distros with **musl** (e.g. Alpine).
+- **`linux-x64-baseline`** — very old CPUs **without AVX2**.
 
 ---
 
-## 🕹️ Cómo se usa
+## 🕹️ How to use
 
-Abre el diálogo de opencode y escribe:
+Open the opencode dialog and type:
 
 ```
 /skill-toggle
 ```
 
-Selecciona la skill que quieras y actívala o desactívala:
+Select the skill you want and enable or disable it:
 
-- ✅ **Enabled** — la skill está activa y disponible.
-- ⭕ **Disabled** — la skill está desactivada; no se carga ni se puede pedir.
+- ✅ **Enabled** — the skill is active and available.
+- ⭕ **Disabled** — the skill is off; it is neither loaded nor invocable.
 
-Tu elección se guarda al instante en disco y se mantiene al reiniciar. 🔁
+Your choice is saved to disk instantly and persists across restarts. 🔁
 
-### 🔌 Estado desde la API (avanzado)
+### 🔌 Query the state via the API (advanced)
 
-Si ejecutas `opencode serve`, el toggle también es consultable vía HTTP, útil
-para scripts y CI:
+If you run `opencode serve`, the toggle is also reachable over HTTP, handy for
+scripts and CI:
 
-| Endpoint | Método | Efecto |
+| Endpoint | Method | Effect |
 |----------|--------|--------|
-| `/skill/status` | GET | Estado de cada skill (enabled/disabled) |
-| `/skill/:name/enable` | POST | Activa la skill al instante |
-| `/skill/:name/disable` | POST | La desactiva al instante y persiste |
+| `/skill/status` | GET | State of each skill (enabled/disabled) |
+| `/skill/:name/enable` | POST | Enables the skill instantly |
+| `/skill/:name/disable` | POST | Disables it instantly and persists |
 
-El diálogo `/skill-toggle` de la interfaz hace exactamente lo mismo.
-
----
-
-## ❓ Preguntas frecuentes
-
-- **¿Pierdo mis conversaciones o ajustes?**
-  No. Esta versión usa la misma base de datos de opencode; no se pierde nada.
-
-- **¿Es una Skill de opencode?**
-  No exactamente: es una mejora del propio opencode (servidor e interfaz), por eso
-  se distribuye como binario y no como plugin.
-
-- **¿Funciona en Windows / macOS?**
-  Sí. Linux, macOS y Windows, todo desde el terminal. En Windows usa el instalador
-  PowerShell; en macOS el de `curl | bash` o el binario `opencode-darwin-*`.
-
-- **¿Puedo desactivar todas las skills?**
-  Sí, cada skill se gestiona de forma independiente. Puedes dejarlas todas
-  apagadas o solo las que no uses.
-
-- **¿El guardián funciona también en macOS / Windows?**
-  Sí. macOS usa un LaunchAgent (launchd, cada 15 min) y Windows un Scheduled
-  Task (cada 15 min y al iniciar sesión); los activa `install.sh` / `install.ps1`
-  automáticamente.
+The `/skill-toggle` dialog does exactly the same thing.
 
 ---
 
-## 🔄 Actualizaciones
+## ❓ FAQ
 
-Este repositorio se reconstruye solo: cuando opencode publica una versión nueva,
-se compila de nuevo con el interruptor y se publica en un release versionado.
-Así siempre tienes lo último **con** el toggle.
+- **Do I lose my conversations or settings?**
+  No. This version uses the same opencode database; nothing is lost.
 
-> Cada build se publica en un **tag único** (`toggle-<versión>` o
-> `toggle-<versión>-r<build>`): el contenido de cada release nunca cambia, con lo
-> que instaladores y guardián descargan siempre el binario correcto sin riesgo de
-> mezclar copias viejas/nuevas en la caché de GitHub (los sockets de instalador
-> y guardián resuelven el tag `toggle-*` más reciente por la API de GitHub).
+- **Is it an opencode Skill?**
+  Not exactly: it is an enhancement of opencode itself (server and UI), which is
+  why it ships as a binary rather than a plugin.
 
-La actualización oficial reemplaza `~/.opencode/bin/opencode` (o `opencode.exe`)
-por el binario limpio. Para que el toggle nunca se pierda, el instalador deja
-**ya activo por defecto** el guardián anti-borrado:
+- **Does it work on Windows / macOS?**
+  Yes. Linux, macOS and Windows, all from the terminal. On Windows use the
+  PowerShell installer; on macOS the `curl | bash` installer or the
+  `opencode-darwin-*` binary.
 
-### 🛡️ Guardián anti-borrado (ya viene configurado)
+- **Can I disable all skills?**
+  Yes, each skill is managed independently. You can leave them all off or only
+  the ones you do not use.
 
-Restaura el toggle solo, en segundo plano, si el binario fue reemplazado:
+- **Does the guard also work on macOS / Windows?**
+  Yes. macOS uses a LaunchAgent (launchd, every 15 min) and Windows a Scheduled
+  Task (every 15 min and at logon); `install.sh` / `install.ps1` set them up
+  automatically.
 
-- Tras instalar deja un **marcador** con el SHA-256 del binario con toggle
-  (un `opencode.sha256` junto al binario).
-- El guardián (`toggle-guard.sh` en Linux/macOS, `toggle-guard.ps1` en Windows)
-  compara ese marcador con el binario actual; si difiere, descarga la build con
-  toggle del release versionado más nuevo, **verifica su SHA256** y la reinstala
-  (reemplazo atómico, sin cortar lo que esté en marcha).
-- Qué lo dispara según el sistema:
+---
 
-  | Sistema | Mecanismo |
+## 🔄 Updates
+
+This repository self-rebuilds: whenever opencode releases a new version, it is
+rebuilt with the toggle and published to a versioned release. That way you always
+get the latest version **with** the toggle.
+
+> Each build is published to a **unique tag** (`toggle-<version>` or
+> `toggle-<version>-r<build>`): the content of every release never changes, so the
+> installers and the guard always download the correct binary with no risk of
+> mixing old/new copies in GitHub's cache (they resolve the most recent `toggle-*`
+> tag through the GitHub API).
+
+The official update replaces `~/.opencode/bin/opencode` (or `opencode.exe`) with
+the clean binary. To make sure the toggle is never lost, the installer leaves the
+**anti-overwrite guard enabled by default**:
+
+### 🛡️ Anti-overwrite guard (already set up)
+
+It restores the toggle silently, in the background, if the binary was replaced:
+
+- After installing it leaves a **marker** with the SHA-256 of the toggle binary
+  (an `opencode.sha256` next to the binary).
+- The guard (`toggle-guard.sh` on Linux/macOS, `toggle-guard.ps1` on Windows)
+  compares that marker with the current binary; if they differ, it downloads the
+  toggle build from the newest versioned release, **verifies its SHA256** and
+  reinstalls it (atomic replacement, without interrupting what is running).
+- What triggers it on each system:
+
+  | System | Mechanism |
   |---------|-----------|
-  | Linux | systemd `--user`: `.path` (inotify) + `.timer` cada 15 min |
-  | macOS | launchd LaunchAgent cada 15 min |
-  | Windows | Task Scheduler cada 15 min y al iniciar sesión |
+  | Linux | systemd `--user`: `.path` (inotify) + `.timer` every 15 min |
+  | macOS | launchd LaunchAgent every 15 min |
+  | Windows | Task Scheduler every 15 min and at logon |
 
-> **No deja ningún proceso en espera**: no hay daemon propio. Lo vigila el
-> planificador del sistema (ya residente) y solo ejecuta el guardián un instante
-> cuando hay algo que hacer.
+> **No process stays waiting**: there is no daemon of its own. The system
+> scheduler (already resident) does the watching and only runs the guard briefly
+> when there is something to do.
 
-Comprobar su estado y desactivarlo:
+Check its status and disable it:
 
 ```bash
-# estado (Linux)
+# status (Linux)
 systemctl --user status opencode-toggle-guard.timer
 
-# desactivar (Linux)
+# disable (Linux)
 systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer
 
-# desactivar (macOS)
+# disable (macOS)
 launchctl unload -w ~/Library/LaunchAgents/com.opencode.skill-toggle-guard.plist
 
-# desactivar (Windows, PowerShell)
+# disable (Windows, PowerShell)
 Unregister-ScheduledTask -TaskName 'opencode-skill-toggle-guard' -Confirm:$false
 
-# que los instaladores no lo vuelvan a crear
+# so that the installers don't re-create it
 TOGGLE_GUARD=0 ./install.sh
 ```
 
-Log de actividad: `~/.opencode/toggle-guard.log`.
+Activity log: `~/.opencode/toggle-guard.log`.
 
-### 🧹 Limpieza automática de residuos
+### 🧹 Automatic residue cleanup
 
-Con cada instalación/restauración se eliminan los restos de versiones anteriores
-(`~/.opencode/bin/opencode.bak`, `opencode.<version>.bak`, temporales
-`*.download`/`*.tmp`), para que no se acumulen cientos de MB. Solo se conservan
-el binario activo y su marcador `opencode.sha256`.
+On every install/restore, leftovers from previous versions are removed
+(`~/.opencode/bin/opencode.bak`, `opencode.<version>.bak`, `*.download`/`*.tmp`
+temporary files), so hundreds of MB never pile up. Only the active binary and its
+`opencode.sha256` marker are kept.
 
 ```bash
-# ejecutar la limpieza a mano (ensayo y ejecución real)
-TOGGLE_CLEANUP_DRY_RUN=1 bash ~/.opencode/toggle-cleanup.sh   # solo lista
-bash ~/.opencode/toggle-cleanup.sh                            # ejecuta
+# run the cleanup manually (dry run and real run)
+TOGGLE_CLEANUP_DRY_RUN=1 bash ~/.opencode/toggle-cleanup.sh   # list only
+bash ~/.opencode/toggle-cleanup.sh                            # actually clean
 
-# conservar un único .bak de la versión anterior
+# keep a single .bak of the previous version
 TOGGLE_CLEANUP_KEEP_BACKUP=1 bash ~/.opencode/toggle-cleanup.sh
 ```
 
-El instalador y el guardián la ejecutan automáticamente en las tres plataformas
-(`toggle-cleanup.sh` en Linux/macOS, `toggle-cleanup.ps1` en Windows).
+The installer and the guard run it automatically on all three platforms
+(`toggle-cleanup.sh` on Linux/macOS, `toggle-cleanup.ps1` on Windows).
 Log: `~/.opencode/toggle-cleanup.log`.
 
-**Opción alternativa — desactivar el autoupdate oficial**
+**Alternative — disable the official autoupdate**
 
-Si prefieres que el instalador oficial jamás toque tu binario (con esto el
-guardián ya no es necesario, aunque tampoco estorba), desactiva el autoupdate en
-`opencode.json`:
+If you prefer that the official installer never touches your binary (which makes
+the guard unnecessary, though it doesn't get in the way either), disable
+autoupdate in `opencode.json`:
 
 ```json
 {
@@ -230,26 +230,28 @@ guardián ya no es necesario, aunque tampoco estorba), desactiva el autoupdate e
 }
 ```
 
-Para actualizar entonces, vuelve a ejecutar el comando de instalación:
-descargará la última build con toggle del release versionado más nuevo.
+To update then, just run the install command again: it will download the latest
+toggle build from the newest versioned release.
 
 ---
 
-## 🔒 Seguridad
+## 🔒 Security
 
-- **🔐 SHA256 verificado**: cada release publica `SHA256SUMS`; el instalador
-  comprueba el binario antes de instalarlo y aborta si no coincide.
-- **🏭 Compilado en GitHub Actions**: los binarios se crean en CI desde el código
-  de upstream + parches, no se suben binarios hechos a mano.
-- **🔗 Actions pineadas a SHA**: versión concreta y fija de `actions/checkout` y
-  `setup-bun`.
-- **🔑 Sin secretos**: el workflow solo usa `GITHUB_TOKEN` con permisos mínimos.
-- Puedes verificar cualquier binario con:
-  `shasum -a 256 opencode` (macOS) o `sha256sum opencode` (Linux).
+- **🔐 SHA256 verified**: every release publishes `SHA256SUMS`; the installer
+  checks the binary before installing it and aborts if it doesn't match.
+- **🏭 Built in GitHub Actions**: binaries are produced in CI from the upstream
+  code + patches, no hand-built binaries are uploaded.
+- **🔗 Actions pinned to SHA**: fixed, specific versions of `actions/checkout`
+  and `setup-bun`.
+- **🔑 No secrets**: the workflow only uses `GITHUB_TOKEN` with minimal
+  permissions.
+- You can verify any binary with:
+  `shasum -a 256 opencode` (macOS) or `sha256sum opencode` (Linux).
 
 ---
 
-## 🆘 ¿Problemas?
+## 🆘 Problems?
 
-Abre un [issue](https://github.com/BenReynor/opencode-skill-toggle/issues) e indica
-tu sistema operativo y la versión que usas. ¡Gracias por reportar! 🙌
+Open an [issue](https://github.com/BenReynor/opencode-skill-toggle/issues) and
+include your operating system and the version you are using. Thanks for
+reporting! 🙌
