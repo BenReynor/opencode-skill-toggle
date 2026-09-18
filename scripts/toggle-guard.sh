@@ -27,7 +27,7 @@ GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
 BIN="${TOGGLE_GUARD_BIN:-$HOME/.opencode/bin/opencode}"
 MARKER="$BIN.sha256"
 LOG="${TOGGLE_GUARD_LOG:-$HOME/.opencode/toggle-guard.log}"
-LOCK="/tmp/opencode-toggle-guard.lock"
+LOCK="/tmp/opencode-toggle-guard.$(id -u).lock"
 TAG_CACHE="$HOME/.opencode/.toggle-guard-tag"
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
@@ -129,7 +129,7 @@ if [[ "$ACTUAL" != "$EXPECTED" ]]; then
   exit 1
 fi
 
-chmod +x "$TMP"
+chmod 755 "$TMP"
 mv -f "$TMP" "$BIN"                      # atomic: works even while opencode is running
 echo "$ACTUAL" > "$MARKER"
 log "skill-toggle reinstalled OK ($PLATFORM, sha256 $ACTUAL)"

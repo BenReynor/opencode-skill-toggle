@@ -114,7 +114,22 @@ if (Test-Path $Final) {
 }
 
 # --- Install ------------------------------------------------------------------
-Move-Item -Force $Tmp $Final
+# Windows locks an executable that is running, so retry for a few seconds if
+# opencode is in use (the running process keeps its old copy; new sessions use
+# the new binary). This mirrors the retry logic in toggle-guard.ps1.
+$Installed = $false
+for ($i = 0; $i -lt 5; $i++) {
+  try {
+    Move-Item -LiteralPath $Tmp -Destination $Final -Force -ErrorAction Stop
+    $Installed = $true
+    break
+  } catch {
+    Start-Sleep -Seconds 2
+  }
+}
+if (-not $Installed) {
+  throw "Could not replace $Final (is opencode running?). The downloaded binary was kept at $Tmp."
+}
 Write-Step "Installed: $Final"
 
 # --- Marker for the guard ---

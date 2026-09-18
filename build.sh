@@ -24,9 +24,9 @@ resolve_tag() {
   if [[ "$VERSION" == "latest" ]]; then
     echo ">> WARNING: 'latest' may require updating the patches." >&2
     echo ">>          the patches are validated for 1.18.30." >&2
-    # Get the latest published tag via the tarball (no git needed)
-    curl -fsSL --proto =https --tlsv1.2 "https://api.github.com/repos/anomalyco/opencode/tags" \
-      | grep -oE '"name": *"v[0-9][^"]*"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/\1/'
+    # Get the latest published release (skips pre-releases; no git needed)
+    curl -fsSL --proto =https --tlsv1.2 "https://api.github.com/repos/anomalyco/opencode/releases/latest" \
+      | grep -oE '"tag_name": *"[^"]+"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/\1/'
   else
     echo "$VERSION"
   fi

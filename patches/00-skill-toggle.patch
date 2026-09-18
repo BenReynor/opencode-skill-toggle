@@ -98,7 +98,7 @@ new file mode 100644
 index 0000000..1c023d2
 --- /dev/null
 +++ b/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,27 @@
 +import { Skill } from "@/skill"
 +import { Effect } from "effect"
 +import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -113,13 +113,11 @@ index 0000000..1c023d2
 +    })
 +
 +    const enable = Effect.fn("SkillHttpApi.enable")(function* (ctx: { params: { name: string } }) {
-+      yield* skill.enable(ctx.params.name)
-+      return true
++      return yield* skill.enable(ctx.params.name)
 +    })
 +
 +    const disable = Effect.fn("SkillHttpApi.disable")(function* (ctx: { params: { name: string } }) {
-+      yield* skill.disable(ctx.params.name)
-+      return true
++      return yield* skill.disable(ctx.params.name)
 +    })
 +
 +    return handlers
@@ -157,8 +155,8 @@ index 5a04ec2..658497f 100644
    readonly dirs: () => Effect.Effect<string[]>
    readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
 +  readonly status: () => Effect.Effect<Record<string, boolean>>
-+  readonly enable: (name: string) => Effect.Effect<void>
-+  readonly disable: (name: string) => Effect.Effect<void>
++  readonly enable: (name: string) => Effect.Effect<boolean>
++  readonly disable: (name: string) => Effect.Effect<boolean>
  }
  
  const add = Effect.fnUntraced(function* (state: State, match: string, events: EventV2Bridge.Service["Service"]) {
@@ -177,7 +175,7 @@ index 5a04ec2..658497f 100644
        return yield* new NotFoundError({ name, available: Object.keys(s.skills).toSorted() })
      })
  
-@@ -307,14 +316,78 @@ const layer = Layer.effect(
+@@ -307,14 +316,80 @@ const layer = Layer.effect(
        return (yield* InstanceState.get(discovered)).dirs
      })
  
@@ -228,30 +226,32 @@ index 5a04ec2..658497f 100644
 +      const s = yield* InstanceState.get(state)
 +      if (!(name in s.skills)) {
 +        yield* Effect.logInfo("skill enable skipped (not found)", { name })
-+        return
++        return false
 +      }
 +      if (enabled.get(name) === true) {
 +        yield* Effect.logInfo("skill already enabled", { name })
-+        return
++        return false
 +      }
 +      enabled.set(name, true)
 +      yield* persistToggle()
 +      yield* Effect.logInfo("skill enabled", { name })
++      return true
 +    })
 +
 +    const disable = Effect.fn("Skill.disable")(function* (name: string) {
 +      const s = yield* InstanceState.get(state)
 +      if (!(name in s.skills)) {
 +        yield* Effect.logInfo("skill disable skipped (not found)", { name })
-+        return
++        return false
 +      }
 +      if (enabled.get(name) === false) {
 +        yield* Effect.logInfo("skill already disabled", { name })
-+        return
++        return false
 +      }
 +      enabled.set(name, false)
 +      yield* persistToggle()
 +      yield* Effect.logInfo("skill disabled", { name })
++      return true
 +    })
 +
 +    return Service.of({ get, require, all, dirs, available, status, enable, disable })
@@ -267,8 +267,8 @@ index 09bac3f..ad34ec0 100644
            dirs: () => Effect.succeed([]),
            available: () => Effect.succeed(skills),
 +          status: () => Effect.succeed(Object.fromEntries(skills.map((skill) => [skill.name, true]))),
-+          enable: () => Effect.void,
-+          disable: () => Effect.void,
++          enable: () => Effect.succeed(true),
++          disable: () => Effect.succeed(true),
          }),
        ),
      ],
@@ -597,35 +597,34 @@ index c48c0f8..a0d38e6 100644
  import { useSDK } from "../context/sdk"
  
 -function Status(props: { enabled: boolean; loading: boolean }) {
-+function Status(props: { enabled: boolean; loading: boolean; active: boolean }) {
++function Status(props: { enabled: boolean; loading: boolean; active: () => boolean }) {
    const { theme } = useTheme()
 +  const fg = selectedForeground(theme)
    if (props.loading) {
 -    return <span style={{ fg: theme.textMuted }}>⋯ Loading</span>
-+    return <span style={{ fg: props.active ? fg : theme.textMuted }}>⋯ Loading</span>
++    return <span style={{ fg: props.active() ? fg : theme.textMuted }}>⋯ Loading</span>
    }
    if (props.enabled) {
 -    return <span style={{ fg: theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
-+    return <span style={{ fg: props.active ? fg : theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
++    return <span style={{ fg: props.active() ? fg : theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
    }
 -  return <span style={{ fg: theme.textMuted }}>○ Disabled</span>
-+  return <span style={{ fg: props.active ? fg : theme.textMuted }}>○ Disabled</span>
++  return <span style={{ fg: props.active() ? fg : theme.textMuted }}>○ Disabled</span>
  }
  
  export function DialogMcp() {
-@@ -24,11 +25,13 @@ export function DialogMcp() {
-   const sdk = useSDK()
-   const [, setRef] = createSignal<DialogSelectRef<unknown>>()
-   const [loading, setLoading] = createSignal<string | null>(null)
+@@ -24,11 +25,12 @@ export function DialogMcp() {
+  const sdk = useSDK()
+  const [, setRef] = createSignal<DialogSelectRef<unknown>>()
+  const [loading, setLoading] = createSignal<string | null>(null)
 +  const [active, setActive] = createSignal<string>()
  
-   const options = createMemo(() => {
-     // Track sync data and loading state to trigger re-render when they change
-     const mcpData = sync.data.mcp
-     const loadingMcp = loading()
-+    const activeMcp = active()
+  const options = createMemo(() => {
+    // Track sync data and loading state to trigger re-render when they change
+    const mcpData = sync.data.mcp
+    const loadingMcp = loading()
  
-     return pipe(
+    return pipe(
        mcpData ?? {},
 @@ -38,7 +41,9 @@ export function DialogMcp() {
          value: name,
@@ -633,7 +632,7 @@ index c48c0f8..a0d38e6 100644
          description: status.status === "failed" ? "failed" : status.status,
 -        footer: <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp === name} />,
 +        footer: (
-+          <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp === name} active={activeMcp === name} />
++          <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp === name} active={() => active() === name} />
 +        ),
          category: undefined,
        })),
@@ -661,16 +660,16 @@ index 0000000..9fc43e2
 +import { TextAttributes } from "@opentui/core"
 +import { useSDK } from "../context/sdk"
 +
-+function Status(props: { enabled: boolean; loading: boolean; active: boolean }) {
++function Status(props: { enabled: boolean; loading: boolean; active: () => boolean }) {
 +  const { theme } = useTheme()
 +  const fg = selectedForeground(theme)
 +  if (props.loading) {
-+    return <span style={{ fg: props.active ? fg : theme.textMuted }}>⋯ Loading</span>
++    return <span style={{ fg: props.active() ? fg : theme.textMuted }}>⋯ Loading</span>
 +  }
 +  if (props.enabled) {
-+    return <span style={{ fg: props.active ? fg : theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
++    return <span style={{ fg: props.active() ? fg : theme.success, attributes: TextAttributes.BOLD }}>✓ Enabled</span>
 +  }
-+  return <span style={{ fg: props.active ? fg : theme.textMuted }}>○ Disabled</span>
++  return <span style={{ fg: props.active() ? fg : theme.textMuted }}>○ Disabled</span>
 +}
 +
 +export function DialogSkillToggle() {
@@ -694,7 +693,7 @@ index 0000000..9fc43e2
 +        title: name,
 +        description: enabled ? "active" : "inactive",
 +        footer: (
-+          <Status enabled={local.skill.isEnabled(name)} loading={loadingSkill === name} active={active() === name} />
++          <Status enabled={local.skill.isEnabled(name)} loading={loadingSkill === name} active={() => active() === name} />
 +        ),
 +        category: undefined,
 +      })),

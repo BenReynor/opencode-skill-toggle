@@ -35,14 +35,14 @@ if (-not (Test-Path -LiteralPath $Dir)) { exit 0 }
 $Name = Split-Path -Leaf $Bin
 
 $targets = @()
-Get-ChildItem -LiteralPath $Dir -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
-  $leaf = $_.Name
+foreach ($item in Get-ChildItem -LiteralPath $Dir -File -Force -ErrorAction SilentlyContinue) {
+  $leaf = $item.Name
   $isBak = $leaf -eq "$Name.bak" -or $leaf -like "$Name.*.bak"
   $isTmp = $leaf -like "$Name.download" -or $leaf -like "$Name.tmp*" -or $leaf -like ".opencode-*.download"
-  if (-not ($isBak -or $isTmp)) { return }
-  if ($KeepBackup -and $leaf -eq "$Name.bak") { return }
-  if ($_.FullName -eq $Bin) { return }
-  $targets += $_.FullName
+  if (-not ($isBak -or $isTmp)) { continue }
+  if ($KeepBackup -and $leaf -eq "$Name.bak") { continue }
+  if ($item.FullName -eq $Bin) { continue }
+  $targets += $item.FullName
 }
 
 if ($targets.Count -eq 0) { exit 0 }
