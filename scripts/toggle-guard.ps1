@@ -1,18 +1,18 @@
 #Requires -Version 5.1
 <#
-  toggle-guard.ps1 — Guardián del skill-toggle para Windows.
+  toggle-guard.ps1 — Guard for skill-toggle on Windows.
 
-  Si opencode.exe fue reemplazado (por el autoupdate oficial o por una
-  instalación manual del binario limpio), reinstala la build con skill-toggle
-  descargándola del release versionado más nuevo y verificando el SHA256.
+  If opencode.exe was replaced (by the official autoupdate or by a manual
+  install of the clean binary), it reinstalls the skill-toggle build,
+  downloading it from the newest versioned release and verifying the SHA256.
 
-  Lo lanza un Scheduled Task creado por install.ps1 (cada 15 min y al iniciar
-  sesión). Puedes ejecutarlo a mano:
+  It is launched by a Scheduled Task created by install.ps1 (every 15 min and at
+  logon). You can also run it manually:
     powershell -NoProfile -ExecutionPolicy Bypass -File toggle-guard.ps1
 
-  Variables opcionales:
-    $env:GH_REPO           repositorio (por defecto BenReynor/opencode-skill-toggle)
-    $env:TOGGLE_GUARD_LOG  ruta del log (por defecto %USERPROFILE%\.opencode\toggle-guard.log)
+  Optional variables:
+    $env:GH_REPO           repository (default BenReynor/opencode-skill-toggle)
+    $env:TOGGLE_GUARD_LOG  log path (default %USERPROFILE%\.opencode\toggle-guard.log)
 #>
 $ErrorActionPreference = "Stop"
 
@@ -23,10 +23,10 @@ $Log = if ($env:TOGGLE_GUARD_LOG) { $env:TOGGLE_GUARD_LOG } else { Join-Path $HO
 $Platform = "windows-x64"
 $TagCache = Join-Path $HOME ".opencode\.toggle-guard-tag"
 
-# Cada build se publica en un tag único (toggle-X.Y.Z o toggle-X.Y.Z-r<build>):
-# su contenido nunca cambia, así que la descarga nunca mezcla bins viejos del
-# CDN (lo que sí ocurriría con "latest", que se sobrescribe). Resolución con
-# caché de 6 horas para no agotar el rate limit de la API.
+# Every build is published to a unique tag (toggle-X.Y.Z or toggle-X.Y.Z-r<build>):
+# its content never changes, so the download never mixes old binaries from the
+# CDN (unlike "latest", which is overwritten). Resolution uses a 6-hour cache so
+# the API rate limit is not exhausted.
 function Resolve-ReleaseBase {
   $tag = "latest"
   try {
@@ -62,7 +62,7 @@ $Want = if (Test-Path -LiteralPath $Marker) { (Get-Content -LiteralPath $Marker 
 
 if (-not $Want -or $Cur -eq $Want) { exit 0 }
 
-Guard-Log "binario distinto al marcado: el autoupdate oficial pudo reemplazarlo; reinstalo skill-toggle"
+Guard-Log "binary differs from the marker: the official autoupdate may have replaced it; reinstalling skill-toggle"
 
 $Tmp = Join-Path $env:TEMP "opencode-toggle.download"
 $ShaTmp = Join-Path $env:TEMP "opencode-toggle.sha"
@@ -73,19 +73,19 @@ try {
 
   $ExpectedLine = Get-Content -LiteralPath $ShaTmp | Where-Object { $_ -match "(?i)opencode-$Platform\s*$" } | Select-Object -First 1
   if (-not $ExpectedLine) {
-    Guard-Log "ERROR: sin checksum para opencode-$Platform"
+    Guard-Log "ERROR: no checksum for opencode-$Platform"
     exit 1
   }
 
   $Expected = ($ExpectedLine -split '\s+')[0].ToLower()
   $Actual = (Get-FileHash -LiteralPath $Tmp -Algorithm SHA256).Hash.ToLower()
   if ($Actual -ne $Expected) {
-    Guard-Log "ERROR: SHA256 no coincide; binario descartado"
+    Guard-Log "ERROR: SHA256 does not match; binary discarded"
     Remove-Item -LiteralPath $Tmp, $ShaTmp -Force -ErrorAction SilentlyContinue
     exit 1
   }
 
-  # Reemplazo con reintentos por si opencode.exe está abierto en estos segundos.
+  # Replacement with retries in case opencode.exe is open during these seconds.
   $Ok = $false
   for ($i = 0; $i -lt 3; $i++) {
     try {
@@ -97,14 +97,14 @@ try {
     }
   }
   if (-not $Ok) {
-    Guard-Log "ERROR: no se pudo reemplazar $Bin (proceso en uso?)"
+    Guard-Log "ERROR: could not replace $Bin (process in use?)"
     exit 1
   }
 
   Set-Content -LiteralPath $Marker -Value $Actual -NoNewline
-  Guard-Log "skill-toggle reinstalado OK ($Platform, sha256 $Actual)"
+  Guard-Log "skill-toggle reinstalled OK ($Platform, sha256 $Actual)"
 
-  # Limpieza de residuos de versiones anteriores (backups .bak / temporales).
+  # Residue cleanup from previous versions (backups .bak / temporary files).
   $Cleanup = Join-Path $HOME ".opencode\toggle-cleanup.ps1"
   if (Test-Path -LiteralPath $Cleanup) {
     & $Cleanup | Out-Null

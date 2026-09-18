@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 <#
-  Instala opencode + skill-toggle (build personalizada del binario de opencode) en Windows.
+  Installs opencode + skill-toggle (custom build of the opencode binary) on Windows.
 
-  Uso:
+  Usage:
     powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.ps1 | iex"
 
-  Opcional:
-    $env:GH_REPO = "tudusuario/opencode-skill-toggle"  antes de ejecutar.
+  Optional:
+    $env:GH_REPO = "youruser/opencode-skill-toggle"  before running.
 
-  Descarga el binario de la plataforma actual desde el release "latest",
-  respalda la instalación anterior y reemplaza %USERPROFILE%\.opencode\bin\opencode.exe.
+  Downloads the current-platform binary from the newest versioned release,
+  backs up the previous installation and replaces %USERPROFILE%\.opencode\bin\opencode.exe.
 #>
 [CmdletBinding()]
 param(
@@ -26,7 +26,7 @@ function Write-Step($Msg) {
   Write-Host ">> $Msg"
 }
 
-# --- Detectar plataforma ----------------------------------------------------
+# --- Detect platform --------------------------------------------------------
 $arch = $env:PROCESSOR_ARCHITECTURE
 if (-not $arch) {
   $arch = $env:PROCESSOR_ARCHITEW6432
@@ -34,20 +34,20 @@ if (-not $arch) {
 switch ($arch) {
   "AMD64" { $Platform = "windows-x64" }
   "ARM64" {
-    Write-Warning "Windows ARM64: no publicamos binario nativo arm64; se usa windows-x64 (emulación en Windows 11 ARM)."
+    Write-Warning "Windows ARM64: no native arm64 binary is published; using windows-x64 (emulation on Windows 11 ARM)."
     $Platform = "windows-x64"
   }
-  default { throw "Plataforma no soportada: $arch" }
+  default { throw "Unsupported platform: $arch" }
 }
-Write-Step "Plataforma: $Platform"
+Write-Step "Platform: $Platform"
 
-# --- Obtener el binario -----------------------------------------------------
+# --- Obtain the binary --------------------------------------------------------
 $BinDir = Join-Path $HOME ".opencode\bin"
 $Final = Join-Path $BinDir "opencode.exe"
 
-# Cada build se publica en un tag único (toggle-X.Y.Z o toggle-X.Y.Z-r<build>):
-# su contenido nunca cambia, así que la descarga nunca mezcla bins viejos de la
-# caché del CDN (lo que sí ocurre con "latest", que se sobrescribe).
+# Every build is published to a unique tag (toggle-X.Y.Z or toggle-X.Y.Z-r<build>):
+# its content never changes, so the download never mixes old binaries from the
+# CDN cache (unlike "latest", which is overwritten on every build).
 function Resolve-ReleaseBase {
   $tag = "latest"
   try {
@@ -65,64 +65,64 @@ $Url = "$ReleaseBase/opencode-$Platform"
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
-Write-Step "Descargando: $Url"
+Write-Step "Downloading: $Url"
 $Tmp = Join-Path $BinDir "opencode.download"
 if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
   & curl.exe -fsSL $Url -o $Tmp
-  if ($LASTEXITCODE -ne 0) { throw "curl no pudo descargar $Url (exit $LASTEXITCODE)" }
+  if ($LASTEXITCODE -ne 0) { throw "curl could not download $Url (exit $LASTEXITCODE)" }
 } else {
   Invoke-WebRequest -Uri $Url -OutFile $Tmp -UseBasicParsing
 }
 
-# --- Verificación SHA256 ----------------------------------------------------
+# --- SHA256 verification ------------------------------------------------------
 $ShaUrl = "$ReleaseBase/SHA256SUMS"
 $ShaTmp = Join-Path $BinDir "opencode-sha256.download"
-Write-Step "Verificando SHA256 contra $ShaUrl"
+Write-Step "Verifying SHA256 against $ShaUrl"
 try {
   if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
     & curl.exe -fsSL $ShaUrl -o $ShaTmp
-    if ($LASTEXITCODE -ne 0) { throw "curl no pudo descargar $ShaUrl (exit $LASTEXITCODE)" }
+    if ($LASTEXITCODE -ne 0) { throw "curl could not download $ShaUrl (exit $LASTEXITCODE)" }
   } else {
     Invoke-WebRequest -Uri $ShaUrl -OutFile $ShaTmp -UseBasicParsing
   }
-  # El formato de SHA256SUMS es "<hash>  opencode-<platform>"
+  # The SHA256SUMS format is "<hash>  opencode-<platform>"
   $ExpectedLine = Get-Content $ShaTmp | Where-Object { $_ -match "(?i)opencode-$Platform\s*$" } | Select-Object -First 1
   if (-not $ExpectedLine) {
-    Write-Warning "No hay checksum para opencode-$Platform; se continúa sin verificar."
+    Write-Warning "No checksum for opencode-$Platform; continuing without verification."
   } else {
     $Expected = ($ExpectedLine -split '\s+')[0]
     $Actual = (Get-FileHash -Path $Tmp -Algorithm SHA256).Hash.ToLower()
     if ($Actual -ne $Expected.ToLower()) {
       Remove-Item -Force $Tmp, $ShaTmp -ErrorAction SilentlyContinue
-      throw "Verificación SHA256 falló para opencode-$Platform. Esperado: $Expected. Obtenido: $Actual. El binario se descartó por posible manipulación."
+      throw "SHA256 verification failed for opencode-$Platform. Expected: $Expected. Got: $Actual. The binary was discarded because of possible tampering."
     }
-    Write-Step "SHA256 verificado correctamente"
+    Write-Step "SHA256 verified correctly"
   }
 } finally {
   if (Test-Path $ShaTmp) { Remove-Item -Force $ShaTmp }
 }
 
-# --- Backup del binario actual ----------------------------------------------
+# --- Backup of the current binary ---------------------------------------------
 if (Test-Path $Final) {
   $Backup = "$Final.bak"
   if (-not (Test-Path $Backup)) {
     Copy-Item $Final $Backup -Force
-    Write-Step "Backup guardado: $Backup"
+    Write-Step "Backup saved: $Backup"
   } else {
-    Write-Step "Backup existente: $Backup (no se sobreescribe)"
+    Write-Step "Backup exists: $Backup (not overwritten)"
   }
 }
 
-# --- Instalar ---------------------------------------------------------------
+# --- Install ------------------------------------------------------------------
 Move-Item -Force $Tmp $Final
-Write-Step "Instalado: $Final"
+Write-Step "Installed: $Final"
 
-# --- Marcador para el guardián ---
+# --- Marker for the guard ---
 $ActualHash = (Get-FileHash -LiteralPath $Final -Algorithm SHA256).Hash.ToLower()
 Set-Content -LiteralPath "$Final.sha256" -Value $ActualHash -NoNewline
 
-# --- Limpieza de residuos ------------------------------------------------------
-# Elimina backups y temporales de versiones anteriores al actualizar.
+# --- Residue cleanup -------------------------------------------------------------
+# Removes backups and temporary files from previous versions on update.
 $Cleanup = Join-Path $HOME ".opencode\toggle-cleanup.ps1"
 if ($PSScriptRoot) {
   $LocalCleanup = Join-Path $PSScriptRoot "scripts\toggle-cleanup.ps1"
@@ -131,19 +131,19 @@ if ($PSScriptRoot) {
   }
 }
 if (-not (Test-Path -LiteralPath $Cleanup)) {
-  Write-Step "Descargando toggle-cleanup.ps1"
+  Write-Step "Downloading toggle-cleanup.ps1"
   Invoke-WebRequest -Uri "$ReleaseBase/toggle-cleanup.ps1" -OutFile $Cleanup -UseBasicParsing -ErrorAction SilentlyContinue
 }
 if (Test-Path -LiteralPath $Cleanup) {
   try {
     & $Cleanup
-    Write-Step "Residuos de versiones anteriores eliminados"
+    Write-Step "Residues of previous versions removed"
   } catch {
-    Write-Warning "La limpieza de residuos no terminó bien; reintenta con: powershell -File `"$Cleanup`""
+    Write-Warning "The residue cleanup did not finish properly; retry with: powershell -File `"$Cleanup`""
   }
 }
 
-# --- Guardián anti-borrado (Task Scheduler) --------------------------------
+# --- Anti-overwrite guard (Task Scheduler) -------------------------------------
 if ($env:TOGGLE_GUARD -ne "0") {
   $Guard = Join-Path $HOME ".opencode\toggle-guard.ps1"
   if ($PSScriptRoot) {
@@ -151,11 +151,11 @@ if ($env:TOGGLE_GUARD -ne "0") {
     if (Test-Path -LiteralPath $LocalGuard) {
       Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
     } else {
-      Write-Step "Descargando toggle-guard.ps1"
+      Write-Step "Downloading toggle-guard.ps1"
       Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
     }
   } else {
-    Write-Step "Descargando toggle-guard.ps1"
+    Write-Step "Downloading toggle-guard.ps1"
     Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
   }
 
@@ -170,27 +170,27 @@ if ($env:TOGGLE_GUARD -ne "0") {
     Register-ScheduledTask -TaskName $TaskName -Action $Action `
       -Trigger $TriggerRun, $TriggerLogon -Force | Out-Null
     Start-ScheduledTask -TaskName $TaskName
-    Write-Step "Guardián anti-borrado activado (Task Scheduler: $TaskName)"
+    Write-Step "Anti-overwrite guard enabled (Task Scheduler: $TaskName)"
     Write-Step "  - log: $(Join-Path $HOME '.opencode\toggle-guard.log')"
-    Write-Step "  - desactivar: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
+    Write-Step "  - disable: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
   } catch {
-    Write-Warning "No se pudo registrar el guardián: $($_.Exception.Message)"
+    Write-Warning "Could not register the guard: $($_.Exception.Message)"
   }
 } else {
-  Write-Step "Guardián anti-borrado no instalado (TOGGLE_GUARD=0)"
+  Write-Step "Anti-overwrite guard not installed (TOGGLE_GUARD=0)"
 }
 
 Write-Host ""
 Write-Host @"
-Aviso importante:
-  - Esta es una build personalizada (no oficial). Mantiene tu opencode.db real.
-  - Al descargar de GitHub Releases, el binario se verifica contra SHA256SUMS.
-  - Guardián anti-borrado ya configurado por defecto: restaura el toggle si la
-    actualización oficial lo reemplaza. (Alternativa: "autoupdate": false en
-    opencode.json desactiva el autoupdate oficial; ver README / Actualizaciones.)
-  - Al ser un binario sin firma, Windows SmartScreen puede mostrarte un aviso
-      la primera vez: pulsa "Más información" > "Ejecutar de todas formas".
-  - Limpieza automática de residuos al actualizar (elimina .bak y temporales
-      de versiones anteriores; conserva uno con TOGGLE_CLEANUP_KEEP_BACKUP=1).
-  - Reinicia opencode para que el binario nuevo quede activo.
+Important notice:
+  - This is a custom (non-official) build. It keeps your real opencode.db.
+  - When downloading from GitHub Releases, the binary is verified against SHA256SUMS.
+  - The anti-overwrite guard is enabled by default: it restores the toggle if the
+    official update replaces it. (Alternative: "autoupdate": false in
+    opencode.json disables the official autoupdate; see README / Updates.)
+  - As an unsigned binary, Windows SmartScreen may warn you the first time:
+      click "More info" > "Run anyway".
+  - Automatic residue cleanup on update (removes .bak and temporary files from
+      previous versions; keeps one with TOGGLE_CLEANUP_KEEP_BACKUP=1).
+  - Restart opencode for the new binary to take effect.
 "@

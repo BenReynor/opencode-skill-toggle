@@ -42,11 +42,11 @@ jobs:
             V="$(gh api repos/anomalyco/opencode/releases/latest --jq .tag_name | sed 's/^v//')"
           fi
           PUBLISHED="$(gh release view "toggle-$V" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || echo '')"
-          # Cada build va a un TAG ÚNICO: si es versión nueva se publica en
-          # toggle-$V; si es rebuild forzado, en toggle-$V-r<run>. Así el
-          # contenido de cada release nunca cambia y se evita mezclar bins
-          # viejos/nuevos en la caché del CDN (problema de sobrescribir
-          # "latest" o "toggle-$V" con --clobber).
+          # Each build goes to a UNIQUE TAG: a new version is published to
+          # toggle-$V; a forced rebuild to toggle-$V-r<run>. Thus the content of
+          # every release never changes, avoiding mixed old/new binaries in the
+          # CDN cache (the problem with overwriting "latest" or "toggle-$V"
+          # with --clobber).
           if [ -n "$PUBLISHED" ]; then
             BUILD_TAG="toggle-${V}-r${{ github.run_number }}"
           else
@@ -108,9 +108,9 @@ jobs:
           SPLIT: "0"
         run: bun run build --skip-embed-web-ui
 
-      - name: Publish versioned release en tag único (+ SHA256SUMS + scripts)
+      - name: Publish versioned release on a unique tag (+ SHA256SUMS + scripts)
         run: |
-          # Binarios que publicamos (el build produce 12 variantes; elegimos las habituales)
+          # The binaries we publish (the build produces 12 variants; we pick the usual ones)
           PLATFORMS="linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl linux-x64-baseline darwin-x64 darwin-arm64 windows-x64"
           DEST="$RUNNER_TEMP/versioned"
           mkdir -p "$DEST"
@@ -125,8 +125,8 @@ jobs:
             ASSET="opencode-${VERSION}-toggle-${PLATFORM}"
             cp "$BIN" "$DEST/$ASSET"
             ASSETS+=("$DEST/$ASSET")
-            # Además del nombre versionado, los mismos binarios con el nombre
-            # plano (como en "latest") para que sirvan de respaldo por estética.
+            # On top of the versioned name, the same binaries under the plain
+            # name (like in "latest") as an aesthetic fallback.
             cp "$BIN" "$DEST/opencode-${PLATFORM}"
             ASSETS+=("$DEST/opencode-${PLATFORM}")
           done
@@ -139,7 +139,7 @@ jobs:
             if [ -f "$f" ]; then
               ASSETS+=("$f")
             else
-              echo ">> aviso: $f no existe, se omite"
+              echo ">> warning: $f does not exist, skipping"
             fi
           done
           if gh release view "$BUILD_TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
@@ -147,11 +147,11 @@ jobs:
           else
             gh release create "$BUILD_TAG" --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" \
               --title "opencode $VERSION + skill-toggle ($BUILD_TAG)" \
-              --notes "Build custom de opencode **$VERSION** con el toggle de skills persistente.
+              --notes "Custom build of opencode **$VERSION** with the persistent skill toggle.
 
-              Release de build **único** (nunca se sobrescribe): el instalador y el guardián resuelven el tag **$BUILD_TAG** (o el más reciente \`toggle-*\`) por la API para descargar siempre el binario correcto.
+              Unique **build release** (never overwritten): the installer and the guard resolve tag **$BUILD_TAG** (or the most recent \`toggle-*\`) via the API so the correct binary is always downloaded.
 
-              Instalar: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) o \`irm .../install.ps1 | iex\` (Windows). Verifica el SHA256 de tu binario con SHA256SUMS."
+              Install: \`curl -sL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | bash\` (Linux/macOS) or \`irm .../install.ps1 | iex\` (Windows). Verify the SHA256 of your binary against SHA256SUMS."
           fi
 
       - name: Publish rolling "latest" assets (+ SHA256SUMS)
@@ -178,23 +178,23 @@ jobs:
             gh release upload latest --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" --clobber
           else
             gh release create latest --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" --title "latest" \
-              --notes "Binarios de la última versión compilada con skill-toggle. Descarga \`opencode-<platform>\` y verifica con SHA256SUMS."
+              --notes "Binaries of the latest version compiled with skill-toggle. Download \`opencode-<platform>\` and verify against SHA256SUMS."
           fi
 
-      - name: Copiar installers y guardianes al release latest
+      - name: Upload installers and guards to the latest release
         run: |
           FILES=()
           for f in install.sh install.ps1 scripts/toggle-guard.sh scripts/toggle-guard.ps1 scripts/toggle-cleanup.sh scripts/toggle-cleanup.ps1; do
             if [ -f "$GITHUB_WORKSPACE/$f" ]; then
               FILES+=("$GITHUB_WORKSPACE/$f")
             else
-              echo ">> aviso: $f no existe en el repo, se omite"
+              echo ">> warning: $f not present in the repo, skipping"
             fi
           done
           if gh release view latest --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
             gh release upload latest --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --clobber
           else
-            gh release create latest --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --title "latest" --notes "instalador"
+            gh release create latest --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --title "latest" --notes "installer"
           fi
 
   smoke:
@@ -230,5 +230,5 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Smoke test del toggle (skill status/enable/disable + persistencia)
+      - name: Smoke test for the toggle (skill status/enable/disable + persistence)
         run: bash "$GITHUB_WORKSPACE/scripts/smoke-test.sh"

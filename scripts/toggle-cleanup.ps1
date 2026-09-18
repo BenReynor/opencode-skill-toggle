@@ -1,21 +1,21 @@
 #Requires -Version 5.1
 <#
-  toggle-cleanup.ps1 — Limpieza de residuos del skill-toggle para Windows.
+  toggle-cleanup.ps1 — Residue cleanup for skill-toggle on Windows.
 
-  Cada vez que se actualiza o se restaura el binario, elimina los restos de
-  versiones anteriores de %USERPROFILE%\.opencode\bin (backups .bak y
-  temporales *.download / *.tmp), evitando que se acumulen cientos de MB.
+  Every time the binary is updated or restored, removes leftovers from previous
+  versions in %USERPROFILE%\.opencode\bin (.bak backups and *.download / *.tmp
+  temporary files), so they never accumulate hundreds of MB.
 
-  Qué conserva:
-    - opencode.exe          (el binario activo con skill-toggle)
-    - opencode.exe.sha256   (marcador del guardián)
+  What it keeps:
+    - opencode.exe          (the active binary with skill-toggle)
+    - opencode.exe.sha256   (the guard's marker)
 
-  Variables opcionales:
-    $env:TOGGLE_CLEANUP_KEEP_BACKUP=1  conservar un único .bak
-    $env:TOGGLE_CLEANUP_DRY_RUN=1      listar sin borrar (ensayo)
-    $env:TOGGLE_CLEANUP_LOG            fichero de log (por defecto %USERPROFILE%\.opencode\toggle-cleanup.log)
+  Optional variables:
+    $env:TOGGLE_CLEANUP_KEEP_BACKUP=1  keep a single .bak
+    $env:TOGGLE_CLEANUP_DRY_RUN=1      list without deleting (dry run)
+    $env:TOGGLE_CLEANUP_LOG            log file (default %USERPROFILE%\.opencode\toggle-cleanup.log)
 
-  Uso:
+  Usage:
     powershell -NoProfile -ExecutionPolicy Bypass -File toggle-cleanup.ps1
 #>
 $ErrorActionPreference = "Stop"
@@ -48,12 +48,12 @@ Get-ChildItem -LiteralPath $Dir -File -Force -ErrorAction SilentlyContinue | For
 if ($targets.Count -eq 0) { exit 0 }
 
 if ($DryRun) {
-  Write-Host ">> (ensayo) pending de eliminar:"
+  Write-Host ">> (dry run) pending deletion:"
   foreach ($t in $targets) { Write-Host "   - $t" }
   exit 0
 }
 
 foreach ($t in $targets) {
   Remove-Item -LiteralPath $t -Force -ErrorAction SilentlyContinue
-  Cleanup-Log "eliminado residuo: $t"
+  Cleanup-Log "removed residue: $t"
 }

@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 #
-# Instala opencode + skill-toggle (build personalizada del binario de opencode).
+# Installs opencode + skill-toggle (custom build of the opencode binary).
 #
-# Uso:
-#   ./install.sh                          # usa el binario junto a este script, o
-#                                         # descarga de GitHub Releases/latest
-#   GH_REPO=tudusuario/opencode-skill-toggle ./install.sh
-#   TOGGLE_GUARD=0 ./install.sh           # no activar el guardián anti-borrado
+# Usage:
+#   ./install.sh                        # uses the binary next to this script, or
+#                                       # downloads it from the GitHub release
+#   GH_REPO=youruser/opencode-skill-toggle ./install.sh
+#   TOGGLE_GUARD=0 ./install.sh         # don't install the anti-overwrite guard
 #
-# Si se encuentra un binario local (opencode-<platform>) al lado de install.sh
-# se usa primero; si no, se descarga del release versionado más nuevo (builds
-# únicas por tag, sin pisar assets — evita bins mezclados de la caché CDN).
+# If a local binary (opencode-<platform>) is found next to install.sh it is
+# used first; otherwise it downloads from the newest versioned release (one
+# build per tag, assets are never overwritten — avoids mixing old/new binaries
+# in the CDN cache).
 set -euo pipefail
 
 GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
 ORIG="$HOME/.opencode/bin/opencode"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd 2>/dev/null || echo "$PWD")"
 
-# --- Detectar plataforma ----------------------------------------------------
+# --- Detect platform --------------------------------------------------------
 detect_platform() {
   local os arch
   os="$(uname -s)"
@@ -33,17 +34,17 @@ detect_platform() {
 
 PLATFORM="$(detect_platform)"
 if [[ "$PLATFORM" == unsupported:* ]]; then
-  echo "Plataforma no soportada: $PLATFORM" >&2
+  echo "Unsupported platform: $PLATFORM" >&2
   exit 1
 fi
-echo ">> Plataforma: $PLATFORM"
+echo ">> Platform: $PLATFORM"
 
-# --- Resolver el release más nuevo (builds únicas, sin pisar assets) ----------
-# Cada build se publica en un release versionado único (toggle-X.Y.Z o
-# toggle-X.Y.Z-r<build>). Resolvemos el tag más reciente por API y descargamos
-# de ahí: como el contenido de cada URL nunca cambia, no hay mezcla de bins
-# viejos/nuevos en la caché del CDN (lo que sí ocurre con "latest", que se
-# sobrescribe en cada build).
+# --- Resolve the newest release (unique builds, assets never overwritten) ----
+# Each build is published to a unique versioned release (toggle-X.Y.Z or
+# toggle-X.Y.Z-r<build>). We resolve the most recent tag via the API and
+# download from there: since the content of every URL never changes, there is no
+# mixing of old/new binaries in the CDN cache (which is what happens with
+# "latest", overwritten on every build).
 resolve_release_base() {
   local tags t
   tags="$(curl -fsSL --proto =https --tlsv1.2 \
@@ -58,7 +59,7 @@ resolve_release_base() {
 RELEASE_BASE="$(resolve_release_base)"
 echo ">> Release: ${RELEASE_BASE#https://github.com/$GH_REPO/releases/download/}"
 
-# --- Obtener el binario -----------------------------------------------------
+# --- Obtain the binary ------------------------------------------------------
 BIN_SRC=""
 for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PLATFORM"; do
   if [[ -f "$candidate" ]]; then
@@ -68,18 +69,18 @@ for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PL
 done
 if [[ -z "$BIN_SRC" ]]; then
   URL="$RELEASE_BASE/opencode-$PLATFORM"
-  echo ">> Descargando: $URL"
+  echo ">> Downloading: $URL"
   BIN_SRC="$SCRIPT_DIR/.opencode-$PLATFORM.download"
   curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$BIN_SRC"
 
-  # --- Verificación SHA256 ---------------------------------------------------
+  # --- SHA256 verification --------------------------------------------------
   SHA_URL="$RELEASE_BASE/SHA256SUMS"
   SHA_FILE="$SCRIPT_DIR/.opencode-sha256.download"
-  echo ">> Verificando SHA256 contra $SHA_URL"
+  echo ">> Verifying SHA256 against $SHA_URL"
   if curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_FILE"; then
     EXPECTED="$(awk -v a="opencode-$PLATFORM" '$2==a {print $1; exit}' "$SHA_FILE")"
     if [[ -z "$EXPECTED" ]]; then
-      echo ">> aviso: no hay checksum para opencode-$PLATFORM; se continúa sin verificar" >&2
+      echo ">> warning: no checksum for opencode-$PLATFORM; continuing without verification" >&2
     else
       if command -v sha256sum >/dev/null 2>&1; then
         ACTUAL="$(sha256sum "$BIN_SRC" | awk '{print $1}')"
@@ -87,41 +88,41 @@ if [[ -z "$BIN_SRC" ]]; then
         ACTUAL="$(shasum -a 256 "$BIN_SRC" | awk '{print $1}')"
       fi
       if [[ "$ACTUAL" != "$EXPECTED" ]]; then
-        echo "ERROR: la verificación SHA256 falló para opencode-$PLATFORM" >&2
-        echo "  esperado: $EXPECTED" >&2
-        echo "  obtenido: $ACTUAL" >&2
+        echo "ERROR: SHA256 verification failed for opencode-$PLATFORM" >&2
+        echo "  expected: $EXPECTED" >&2
+        echo "  got: $ACTUAL" >&2
         rm -f "$BIN_SRC" "$SHA_FILE"
-        echo "  El binario se descartó por posible manipulación." >&2
+        echo "  The binary was discarded because of possible tampering." >&2
         exit 1
       fi
-      echo ">> SHA256 verificado correctamente"
+      echo ">> SHA256 verified correctly"
     fi
   else
-    echo ">> aviso: no se pudo descargar SHA256SUMS; se continúa sin verificar" >&2
+    echo ">> warning: could not download SHA256SUMS; continuing without verification" >&2
   fi
   rm -f "$SHA_FILE"
 fi
 
-# --- Backup del binario actual ----------------------------------------------
+# --- Backup of the current binary -------------------------------------------
 mkdir -p "$HOME/.opencode/bin"
 if [[ -f "$ORIG" && ! -f "$ORIG.bak" ]]; then
   cp "$ORIG" "$ORIG.bak"
-  echo ">> Backup guardado: $ORIG.bak"
+  echo ">> Backup saved: $ORIG.bak"
 elif [[ -f "$ORIG" ]]; then
-  echo ">> Backup existente: $ORIG.bak (no se sobreescribe)"
+  echo ">> Backup exists: $ORIG.bak (not overwritten)"
 fi
 
-# --- Instalar ---------------------------------------------------------------
-# Reemplazo atómico (mv): no falla con "Text file busy" aunque opencode esté
-# en ejecución. El proceso en marcha conserva su inode viejo y las sesiones
-# nuevas usan el binario nuevo.
+# --- Install ----------------------------------------------------------------
+# Atomic replacement (mv): does not fail with "Text file busy" even when
+# opencode is running. The running process keeps its old inode, and new
+# sessions use the new binary.
 TMP="$ORIG.tmp.$$"
 cp "$BIN_SRC" "$TMP"
 chmod +x "$TMP"
 mv -f "$TMP" "$ORIG"
 rm -f "$SCRIPT_DIR/.opencode-$PLATFORM.download"
 
-# Marcador para el guardián: hash del binario con toggle recién instalado.
+# Marker for the guard: hash of the just-installed toggle binary.
 if command -v sha256sum >/dev/null 2>&1; then
   HASH_ACTUAL="$(sha256sum "$ORIG" | awk '{print $1}')"
 else
@@ -129,19 +130,19 @@ else
 fi
 echo "$HASH_ACTUAL" > "$ORIG.sha256"
 
-echo ">> opencode con skill-toggle instalado: $ORIG"
+echo ">> opencode with skill-toggle installed: $ORIG"
 echo
 
-# --- Limpieza de residuos ------------------------------------------------------
-# Elimina backups y temporales de versiones anteriores al actualizar, para que
-# no se acumulen cientos de MB con cada versión. Conserva binario + marcador.
-#   - conserva un .bak de la anterior: TOGGLE_CLEANUP_KEEP_BACKUP=1
-#   - ensayo (solo listar):           TOGGLE_CLEANUP_DRY_RUN=1
+# --- Residue cleanup --------------------------------------------------------
+# Removes backups and temporary files from previous versions on update, so
+# hundreds of MB never pile up. Keeps the binary + marker.
+#   - keep a single .bak of the previous one: TOGGLE_CLEANUP_KEEP_BACKUP=1
+#   - dry run (list only):                   TOGGLE_CLEANUP_DRY_RUN=1
 CLEANUP="$HOME/.opencode/toggle-cleanup.sh"
 if [[ -f "$SCRIPT_DIR/scripts/toggle-cleanup.sh" ]]; then
   cp "$SCRIPT_DIR/scripts/toggle-cleanup.sh" "$CLEANUP"
 elif [[ ! -f "$CLEANUP" ]]; then
-  echo ">> Descargando toggle-cleanup.sh"
+  echo ">> Downloading toggle-cleanup.sh"
   curl -fsSL --proto =https --tlsv1.2 \
     "$RELEASE_BASE/toggle-cleanup.sh" \
     -o "$CLEANUP" || rm -f "$CLEANUP"
@@ -149,25 +150,25 @@ fi
 if [[ -f "$CLEANUP" ]]; then
   chmod +x "$CLEANUP" 2>/dev/null || true
   if bash "$CLEANUP"; then
-    echo ">> Residuos de versiones anteriores eliminados"
+    echo ">> Residues of previous versions removed"
   else
-    echo ">> Aviso: la limpieza de residuos no terminó bien; reintenta con: bash $CLEANUP" >&2
+    echo ">> Warning: residue cleanup did not finish properly; retry with: bash $CLEANUP" >&2
   fi
 fi
 echo
 
-# --- Guardián anti-borrado ----------------------------------------------------
-# Si el installador oficial (autoupdate / "opencode upgrade") reemplaza el
-# binario, toggle-guard.sh lo restaura en segundo plano.
-#   - Linux:  systemd --user (.path con inotify + .timer cada 15 min)
-#   - macOS:  launchd (LaunchAgent con StartInterval de 15 min)
-#   - Windows: Scheduled Task (lo gestiona install.ps1)
+# --- Anti-overwrite guard ---------------------------------------------------
+# If the official installer (autoupdate / "opencode upgrade") replaces the
+# binary, toggle-guard.sh restores it in the background.
+#   - Linux:   systemd --user (.path with inotify + .timer every 15 min)
+#   - macOS:   launchd (LaunchAgent with a 15-min StartInterval)
+#   - Windows: Scheduled Task (handled by install.ps1)
 if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
   GUARD="$HOME/.opencode/toggle-guard.sh"
   if [[ -f "$SCRIPT_DIR/scripts/toggle-guard.sh" ]]; then
     cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
   else
-    echo ">> Descargando toggle-guard.sh"
+    echo ">> Downloading toggle-guard.sh"
     curl -fsSL --proto =https --tlsv1.2 \
       "$RELEASE_BASE/toggle-guard.sh" \
       -o "$GUARD"
@@ -181,7 +182,7 @@ if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
 
     cat > "$UDIR/opencode-toggle-guard.path" <<EOF
 [Unit]
-Description=Detecta cambios en el binario de opencode (skill-toggle)
+Description=Detects changes in the opencode binary (skill-toggle)
 
 [Path]
 PathChanged=%h/.opencode/bin/opencode
@@ -193,7 +194,7 @@ EOF
 
     cat > "$UDIR/opencode-toggle-guard.service" <<EOF
 [Unit]
-Description=Reinstala el skill-toggle si el binario de opencode fue reemplazado
+Description=Reinstalls skill-toggle if the opencode binary was replaced
 
 [Service]
 Type=oneshot
@@ -202,7 +203,7 @@ EOF
 
     cat > "$UDIR/opencode-toggle-guard.timer" <<EOF
 [Unit]
-Description=Copia de seguridad del skill-toggle (cada 15 min)
+Description=skill-toggle backup (every 15 min)
 
 [Timer]
 OnBootSec=2min
@@ -216,10 +217,10 @@ EOF
       systemctl --user enable --now opencode-toggle-guard.path \
         opencode-toggle-guard.timer >/dev/null 2>&1 || true
       systemctl --user start opencode-toggle-guard.service >/dev/null 2>&1 || true
-      echo ">> Guardián anti-borrado activado (systemd --user)"
-      echo ">>   - desactivar: systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer"
+      echo ">> Anti-overwrite guard enabled (systemd --user)"
+      echo ">>   - disable: systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer"
     else
-      echo ">> Aviso: systemd --user no disponible; añade a cron: */15 * * * * $GUARD" >&2
+      echo ">> Warning: systemd --user not available; add to cron: */15 * * * * $GUARD" >&2
     fi
 
   elif [[ "$OS" == "Darwin" ]]; then
@@ -247,30 +248,30 @@ EOF
 EOF
     launchctl unload "$LA" >/dev/null 2>&1 || true
     if launchctl load -w "$LA" >/dev/null 2>&1; then
-      echo ">> Guardián anti-borrado activado (launchd: $LA)"
-      echo ">>   - desactivar: launchctl unload -w $LA"
+      echo ">> Anti-overwrite guard enabled (launchd: $LA)"
+      echo ">>   - disable: launchctl unload -w $LA"
     else
-      echo ">> Aviso: no se pudo cargar el LaunchAgent $LA" >&2
+      echo ">> Warning: could not load LaunchAgent $LA" >&2
     fi
 
   else
-    echo ">> Guardián desplegado en $GUARD pero sin planificador para $OS;"
-    echo ">>   añádelo a cron: */15 * * * * $GUARD"
+    echo ">> Guard deployed at $GUARD but no scheduler for $OS;"
+    echo ">>   add it to cron: */15 * * * * $GUARD"
   fi
 else
-  echo ">> Guardián anti-borrado no instalado (TOGGLE_GUARD=0)"
+  echo ">> Anti-overwrite guard not installed (TOGGLE_GUARD=0)"
 fi
 
 cat <<'EOF'
-Aviso importante:
-  - Esta es una build personalizada (no oficial). Mantiene tu opencode.db real.
-  - Al descargar de GitHub Releases, el binario se verifica contra SHA256SUMS.
-  - Guardián anti-borrado ya configurado por defecto: restaura el toggle si la
-    actualización oficial lo reemplaza. (Alternativa: "autoupdate": false en
-    opencode.json desactiva el autoupdate oficial; ambas cosas se explican en
-    el README, sección Actualizaciones.)
-  - El reemplazo es atómico: puedes reinstalar incluso con opencode abierto.
-  - Limpieza automática de residuos al actualizar (elimina .bak y temporales de
-    versiones anteriores; conserva uno con TOGGLE_CLEANUP_KEEP_BACKUP=1).
-  - Reinicia opencode para que el binario nuevo quede activo.
+Important notice:
+  - This is a custom (non-official) build. It keeps your real opencode.db.
+  - When downloading from GitHub Releases, the binary is verified against SHA256SUMS.
+  - The anti-overwrite guard is enabled by default: it restores the toggle if the
+    official update replaces it. (Alternative: "autoupdate": false in
+    opencode.json disables the official autoupdate; both are explained in the
+    README, Updates section.)
+  - The replacement is atomic: you can reinstall even while opencode is open.
+  - Automatic residue cleanup on update (removes .bak and temporary files from
+    previous versions; keeps one with TOGGLE_CLEANUP_KEEP_BACKUP=1).
+  - Restart opencode for the new binary to take effect.
 EOF

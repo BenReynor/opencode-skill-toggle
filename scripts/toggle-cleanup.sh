@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
 #
-# toggle-cleanup.sh — Limpieza de residuos del skill-toggle.
+# toggle-cleanup.sh — Residue cleanup for skill-toggle.
 #
-# Cada vez que se actualiza o se restaura el binario, elimina los restos de
-# versiones anteriores que se acumulan en $HOME/.opencode/bin (backups .bak y
-# temporales *.download / *.tmp), evitando que se coman cientos de MB.
+# Every time the binary is updated or restored, removes leftovers from previous
+# versions that pile up in $HOME/.opencode/bin (.bak backups and *.download /
+# *.tmp temporary files), so they never eat hundreds of MB.
 #
-# Qué conserva:
-#   - $BIN             (el binario activo con skill-toggle)
-#   - $BIN.sha256      (marcador del guardián)
+# What it keeps:
+#   - $BIN             (the active binary with skill-toggle)
+#   - $BIN.sha256      (the guard's marker)
 #
-# Qué elimina:
-#   - $BIN.bak y $BIN.<version>.bak     (backups de versiones anteriores)
-#   - $BIN.tmp*, $BIN.download          (temporales del instalador)
-#   - .opencode-*.download              (descargas SHA256/temporales)
+# What it removes:
+#   - $BIN.bak and $BIN.<version>.bak     (backups from previous versions)
+#   - $BIN.tmp*, $BIN.download            (installer temporary files)
+#   - .opencode-*.download                (SHA256 / temporary downloads)
 #
-# Variables opcionales:
-#   TOGGLE_GUARD_BIN            ruta del binario (por defecto $HOME/.opencode/bin/opencode)
-#   TOGGLE_CLEANUP_KEEP_BACKUP=1  conservar un único .bak de la versión anterior
-#   TOGGLE_CLEANUP_DRY_RUN=1      listar sin borrar (ensayo)
-#   TOGGLE_CLEANUP_LOG            fichero de log (por defecto $HOME/.opencode/toggle-cleanup.log)
+# Optional variables:
+#   TOGGLE_GUARD_BIN            binary path (default $HOME/.opencode/bin/opencode)
+#   TOGGLE_CLEANUP_KEEP_BACKUP=1  keep a single .bak of the previous version
+#   TOGGLE_CLEANUP_DRY_RUN=1      list without deleting (dry run)
+#   TOGGLE_CLEANUP_LOG            log file (default $HOME/.opencode/toggle-cleanup.log)
 #
-# Uso:
+# Usage:
 #   bash toggle-cleanup.sh
 #
 set -euo pipefail
@@ -38,7 +38,7 @@ NAME="$(basename "$BIN")"
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
 
-# --- Reunir candidatos (backups + temporales) --------------------------------
+# --- Collect candidates (backups + temporary files) ---------------------------
 shopt -s nullglob dotglob
 candidates=(
   "$DIR"/"$NAME"*.bak
@@ -61,7 +61,7 @@ if [[ "${#targets[@]}" -eq 0 ]]; then
 fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
-  echo ">> (ensayo) pending de eliminar:"
+  echo ">> (dry run) pending deletion:"
   for f in "${targets[@]}"; do
     echo "   - $f"
   done
@@ -70,5 +70,5 @@ fi
 
 for f in "${targets[@]}"; do
   rm -f "$f"
-  log "eliminado residuo: $f"
+  log "removed residue: $f"
 done
