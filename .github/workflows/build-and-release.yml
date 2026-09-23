@@ -30,6 +30,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       published: ${{ steps.resolve.outputs.published }}
       build_tag: ${{ steps.resolve.outputs.build_tag }}
+      download_tag: ${{ steps.resolve.outputs.download_tag }}
     steps:
       - name: Resolve version
         id: resolve
@@ -52,10 +53,19 @@ jobs:
           else
             BUILD_TAG="toggle-$V"
           fi
+          # Where smoke tests must download from: if build runs it validates the
+          # freshly built binaries (BUILD_TAG); if build is skipped (already
+          # published, no force) it validates the existing release instead.
+          if [ "${{ github.event.inputs.force }}" = "true" ] || [ -z "$PUBLISHED" ]; then
+            DOWNLOAD_TAG="$BUILD_TAG"
+          else
+            DOWNLOAD_TAG="toggle-$V"
+          fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "tag=v$V" >> "$GITHUB_OUTPUT"
           echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
           echo "build_tag=$BUILD_TAG" >> "$GITHUB_OUTPUT"
+          echo "download_tag=$DOWNLOAD_TAG" >> "$GITHUB_OUTPUT"
 
   build:
     needs: detect
@@ -200,7 +210,7 @@ jobs:
   smoke:
     name: Smoke ${{ matrix.platform }}
     needs: [detect, build]
-    if: ${{ always() && needs.detect.result == 'success' && needs.build.result == 'success' }}
+    if: ${{ always() && needs.detect.result == 'success' && needs.build.result != 'failure' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -219,7 +229,7 @@ jobs:
             platform: windows-x64
     env:
       PLATFORM: ${{ matrix.platform }}
-      DOWNLOAD_BASE: https://github.com/${{ github.repository }}/releases/download/${{ needs.detect.outputs.build_tag }}
+      DOWNLOAD_BASE: https://github.com/${{ github.repository }}/releases/download/${{ needs.detect.outputs.download_tag }}
       EXPECTED_VERSION: ${{ needs.detect.outputs.version }}
     defaults:
       run:
