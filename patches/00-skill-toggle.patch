@@ -614,17 +614,17 @@ index c48c0f8..a0d38e6 100644
  
  export function DialogMcp() {
 @@ -24,11 +25,12 @@ export function DialogMcp() {
-  const sdk = useSDK()
-  const [, setRef] = createSignal<DialogSelectRef<unknown>>()
-  const [loading, setLoading] = createSignal<string | null>(null)
+   const sdk = useSDK()
+   const [, setRef] = createSignal<DialogSelectRef<unknown>>()
+   const [loading, setLoading] = createSignal<string | null>(null)
 +  const [active, setActive] = createSignal<string>()
  
-  const options = createMemo(() => {
-    // Track sync data and loading state to trigger re-render when they change
-    const mcpData = sync.data.mcp
-    const loadingMcp = loading()
+   const options = createMemo(() => {
+     // Track sync data and loading state to trigger re-render when they change
+     const mcpData = sync.data.mcp
+     const loadingMcp = loading()
  
-    return pipe(
+     return pipe(
        mcpData ?? {},
 @@ -38,7 +41,9 @@ export function DialogMcp() {
          value: name,
