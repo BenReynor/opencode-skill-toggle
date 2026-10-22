@@ -18,20 +18,43 @@ index f5076ad..5fabc03 100644
    .addHttpApi(SyncApi)
    .addHttpApi(TuiApi)
    .addHttpApi(WorkspaceApi)
+diff --git a/packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts b/packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts
+index 6fd18c8..f4591e3 100644
+--- a/packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts
++++ b/packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts
+@@ -157,7 +157,7 @@ export const InstanceApi = HttpApi.make("instance")
+           }),
+         ),
+         HttpApiEndpoint.get("skill", InstancePaths.skill, {
+-          query: WorkspaceRoutingQuery,
++          query: Schema.Struct({ ...WorkspaceRoutingQueryFields, session: Schema.optional(Schema.String) }),
+           success: described(Schema.Array(Skill.Info), "List of skills"),
+         }).annotateMerge(
+           OpenApi.annotations({
 diff --git a/packages/opencode/src/server/routes/instance/httpapi/groups/skill.ts b/packages/opencode/src/server/routes/instance/httpapi/groups/skill.ts
 new file mode 100644
-index 0000000..124df56
+index 0000000..1cff8d5
 --- /dev/null
 +++ b/packages/opencode/src/server/routes/instance/httpapi/groups/skill.ts
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,79 @@
 +import { Schema } from "effect"
 +import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 +import { described } from "./metadata"
 +import { Authorization } from "../middleware/authorization"
 +import { InstanceContextMiddleware } from "../middleware/instance-context"
-+import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
++import {
++  WorkspaceRoutingMiddleware,
++  WorkspaceRoutingQueryFields,
++} from "../middleware/workspace-routing"
 +
 +export const SkillStatusMap = Schema.Record(Schema.String, Schema.Boolean)
++
++// `session` scopes the toggle to one session. Without it the request reads or
++// edits the template used by sessions created from now on.
++export const SkillQuery = Schema.Struct({
++  ...WorkspaceRoutingQueryFields,
++  session: Schema.optional(Schema.String),
++})
 +
 +export const SkillPaths = {
 +  status: "/skill/status",
@@ -44,7 +67,7 @@ index 0000000..124df56
 +    HttpApiGroup.make("skill")
 +      .add(
 +        HttpApiEndpoint.get("status", SkillPaths.status, {
-+          query: WorkspaceRoutingQuery,
++          query: SkillQuery,
 +          success: described(SkillStatusMap, "Skill enabled status"),
 +        }).annotateMerge(
 +          OpenApi.annotations({
@@ -55,7 +78,7 @@ index 0000000..124df56
 +        ),
 +        HttpApiEndpoint.post("enable", SkillPaths.enable, {
 +          params: { name: Schema.String },
-+          query: WorkspaceRoutingQuery,
++          query: SkillQuery,
 +          success: described(Schema.Boolean, "Skill enabled successfully"),
 +        }).annotateMerge(
 +          OpenApi.annotations({
@@ -66,7 +89,7 @@ index 0000000..124df56
 +        ),
 +        HttpApiEndpoint.post("disable", SkillPaths.disable, {
 +          params: { name: Schema.String },
-+          query: WorkspaceRoutingQuery,
++          query: SkillQuery,
 +          success: described(Schema.Boolean, "Skill disabled successfully"),
 +        }).annotateMerge(
 +          OpenApi.annotations({
@@ -93,12 +116,27 @@ index 0000000..124df56
 +      description: "Experimental HttpApi surface for selected instance routes.",
 +    }),
 +  )
+diff --git a/packages/opencode/src/server/routes/instance/httpapi/handlers/instance.ts b/packages/opencode/src/server/routes/instance/httpapi/handlers/instance.ts
+index f851b3a..ed15281 100644
+--- a/packages/opencode/src/server/routes/instance/httpapi/handlers/instance.ts
++++ b/packages/opencode/src/server/routes/instance/httpapi/handlers/instance.ts
+@@ -81,8 +81,8 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
+       return yield* agent.list()
+     })
+ 
+-    const getSkill = Effect.fn("InstanceHttpApi.skill")(function* () {
+-      return yield* skill.all()
++    const getSkill = Effect.fn("InstanceHttpApi.skill")(function* (ctx: { query: { session?: string } }) {
++      return yield* skill.available(undefined, ctx.query.session)
+     })
+ 
+     const getLsp = Effect.fn("InstanceHttpApi.lsp")(function* () {
 diff --git a/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts b/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts
 new file mode 100644
-index 0000000..1c023d2
+index 0000000..9e11f64
 --- /dev/null
 +++ b/packages/opencode/src/server/routes/instance/httpapi/handlers/skill.ts
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,29 @@
 +import { Skill } from "@/skill"
 +import { Effect } from "effect"
 +import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -108,16 +146,18 @@ index 0000000..1c023d2
 +  Effect.gen(function* () {
 +    const skill = yield* Skill.Service
 +
-+    const status = Effect.fn("SkillHttpApi.status")(function* () {
-+      return yield* skill.status()
++    type Query = { session?: string }
++
++    const status = Effect.fn("SkillHttpApi.status")(function* (ctx: { query: Query }) {
++      return yield* skill.status(ctx.query.session)
 +    })
 +
-+    const enable = Effect.fn("SkillHttpApi.enable")(function* (ctx: { params: { name: string } }) {
-+      return yield* skill.enable(ctx.params.name)
++    const enable = Effect.fn("SkillHttpApi.enable")(function* (ctx: { params: { name: string }; query: Query }) {
++      return yield* skill.enable(ctx.params.name, ctx.query.session)
 +    })
 +
-+    const disable = Effect.fn("SkillHttpApi.disable")(function* (ctx: { params: { name: string } }) {
-+      return yield* skill.disable(ctx.params.name)
++    const disable = Effect.fn("SkillHttpApi.disable")(function* (ctx: { params: { name: string }; query: Query }) {
++      return yield* skill.disable(ctx.params.name, ctx.query.session)
 +    })
 +
 +    return handlers
@@ -127,10 +167,10 @@ index 0000000..1c023d2
 +  }),
 +)
 diff --git a/packages/opencode/src/server/routes/instance/httpapi/server.ts b/packages/opencode/src/server/routes/instance/httpapi/server.ts
-index fb9d2db..87964f4 100644
+index 94555ca..ddd681d 100644
 --- a/packages/opencode/src/server/routes/instance/httpapi/server.ts
 +++ b/packages/opencode/src/server/routes/instance/httpapi/server.ts
-@@ -90,6 +90,7 @@ import { fileHandlers } from "./handlers/file"
+@@ -89,6 +89,7 @@ import { fileHandlers } from "./handlers/file"
  import { globalHandlers } from "./handlers/global"
  import { instanceHandlers } from "./handlers/instance"
  import { mcpHandlers } from "./handlers/mcp"
@@ -138,7 +178,7 @@ index fb9d2db..87964f4 100644
  import { permissionHandlers } from "./handlers/permission"
  import { projectHandlers } from "./handlers/project"
  import { projectCopyHandlers } from "./handlers/project-copy"
-@@ -158,6 +159,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
+@@ -157,6 +158,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
      fileHandlers,
      instanceHandlers,
      mcpHandlers,
@@ -146,43 +186,203 @@ index fb9d2db..87964f4 100644
      projectHandlers,
      projectCopyHandlers,
      ptyHandlers,
-diff --git a/packages/opencode/src/skill/index.ts b/packages/opencode/src/skill/index.ts
-index 5a04ec2..658497f 100644
---- a/packages/opencode/src/skill/index.ts
-+++ b/packages/opencode/src/skill/index.ts
-@@ -100,6 +100,9 @@ export interface Interface {
-   readonly all: () => Effect.Effect<Info[]>
-   readonly dirs: () => Effect.Effect<string[]>
-   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
-+  readonly status: () => Effect.Effect<Record<string, boolean>>
-+  readonly enable: (name: string) => Effect.Effect<boolean>
-+  readonly disable: (name: string) => Effect.Effect<boolean>
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index 0f85d44..a58fb05 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -14,6 +14,7 @@ import { type Tool as AITool, tool, jsonSchema } from "ai"
+ import type { JSONSchema7 } from "@ai-sdk/provider"
+ import { SessionCompaction } from "./compaction"
+ import { SystemPrompt } from "./system"
++import { Skill } from "@/skill"
+ import { Instruction } from "./instruction"
+ import { Plugin } from "../plugin"
+ import { MAX_STEPS_PROMPT } from "@opencode-ai/core/session/runner/max-steps"
+@@ -136,6 +137,7 @@ const layer = Layer.effect(
+     const revert = yield* SessionRevert.Service
+     const summary = yield* SessionSummary.Service
+     const sys = yield* SystemPrompt.Service
++    const skill = yield* Skill.Service
+     const llm = yield* LLM.Service
+     const events = yield* EventV2Bridge.Service
+     const flags = yield* RuntimeFlags.Service
+@@ -1255,7 +1257,7 @@ const layer = Layer.effect(
+             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+ 
+             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
+-              sys.skills(agent),
++              sys.skills(agent, sessionID, session.time.created),
+               sys.environment(model),
+               instruction.system().pipe(Effect.orDie),
+               sys.mcp(agent, session.permission),
+@@ -1360,6 +1362,16 @@ const layer = Layer.effect(
+         agent: input.agent,
+       })
+       const cmd = yield* commands.get(input.command)
++      if (cmd?.source === "skill") {
++        const enabled = yield* skill.isEnabled(cmd.name, input.sessionID)
++        if (!enabled) {
++          const error = new NamedError.Unknown({
++            message: `Command not found: "${input.command}". The skill is disabled for this session.`,
++          })
++          yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
++          throw error
++        }
++      }
+       if (!cmd) {
+         const available = (yield* commands.list()).map((c) => c.name)
+         const hint = available.length ? ` Available commands: ${available.join(", ")}` : ""
+@@ -1607,6 +1619,7 @@ export const node = LayerNode.make({
+     SessionCompaction.node,
+     Plugin.node,
+     Command.node,
++    Skill.node,
+     Config.node,
+     Permission.node,
+     FSUtil.node,
+diff --git a/packages/opencode/src/session/system.ts b/packages/opencode/src/session/system.ts
+index 61ab74d..3c38aae 100644
+--- a/packages/opencode/src/session/system.ts
++++ b/packages/opencode/src/session/system.ts
+@@ -52,7 +52,7 @@ export function provider(model: Provider.Model) {
+ 
+ export interface Interface {
+   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
+-  readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
++  readonly skills: (agent: Agent.Info, sessionID?: string, createdAt?: number) => Effect.Effect<string | undefined>
+   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
  }
  
- const add = Effect.fnUntraced(function* (state: State, match: string, events: EventV2Bridge.Service["Service"]) {
-@@ -294,7 +297,13 @@ const layer = Layer.effect(
-     const require = Effect.fn("Skill.require")(function* (name: string) {
-       const s = yield* InstanceState.get(state)
-       const info = s.skills[name]
--      if (info) return info
-+      if (info && enabled.get(name) !== false) return info
-+      if (info && enabled.get(name) === false) {
-+        return yield* new NotFoundError({
-+          name,
-+          available: Object.keys(s.skills).filter((n) => enabled.get(n) !== false).toSorted(),
-+        })
-+      }
-       return yield* new NotFoundError({ name, available: Object.keys(s.skills).toSorted() })
-     })
+@@ -104,10 +104,10 @@ const layer = Layer.effect(
+         ].filter((part): part is string => part !== undefined)
+       }),
  
-@@ -307,14 +316,80 @@ const layer = Layer.effect(
-       return (yield* InstanceState.get(discovered)).dirs
-     })
+-      skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {
++      skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info, sessionID?: string, createdAt?: number) {
+         if (Permission.disabled(["skill"], agent.permission).has("skill")) return
  
-+    const toggleFile = () => path.join(global.data, "skills-toggle.json")
+-        const list = yield* skill.available(agent)
++        const list = yield* skill.available(agent, sessionID, createdAt)
+ 
+         return [
+           "Skills provide specialized instructions and workflows for specific tasks.",
+diff --git a/packages/opencode/src/skill/index.ts b/packages/opencode/src/skill/index.ts
+index 5a04ec2..7f26131 100644
+--- a/packages/opencode/src/skill/index.ts
++++ b/packages/opencode/src/skill/index.ts
+@@ -96,12 +96,45 @@ type ScanState = {
+ 
+ export interface Interface {
+   readonly get: (name: string) => Effect.Effect<Info | undefined>
+-  readonly require: (name: string) => Effect.Effect<Info, NotFoundError>
++  readonly require: (name: string, sessionID?: string, createdAt?: number) => Effect.Effect<Info, NotFoundError>
+   readonly all: () => Effect.Effect<Info[]>
+   readonly dirs: () => Effect.Effect<string[]>
+-  readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
++  readonly available: (agent?: Agent.Info, sessionID?: string, createdAt?: number) => Effect.Effect<Info[]>
++  readonly status: (sessionID?: string, createdAt?: number) => Effect.Effect<Record<string, boolean>>
++  readonly enable: (name: string, sessionID?: string, createdAt?: number) => Effect.Effect<boolean>
++  readonly disable: (name: string, sessionID?: string, createdAt?: number) => Effect.Effect<boolean>
++  readonly isEnabled: (name: string, sessionID?: string, createdAt?: number) => Effect.Effect<boolean>
+ }
+ 
++// Per-session skill configuration.
++//
++// Every session gets its own snapshot of which skills are enabled, so switching
++// back to an old session restores exactly what it had. New sessions start with
++// every skill disabled except the built-in one (otherwise the model could not
++// even read opencode's own configuration). Sessions that existed before this
++// format was introduced keep the global configuration they already had.
++const TOGGLE_VERSION = 2
++const TOGGLE_FILE = "skills-toggle.json"
++// Keep the file bounded: drop the least recently used sessions first.
++const TOGGLE_KEEP_SESSIONS = 500
++const BUILTIN_SKILL = CUSTOMIZE_OPENCODE_SKILL_NAME
 +
-+    let enabled = new Map<string, boolean>()
-+    const persisted = yield* fsys.readFileStringSafe(toggleFile())
++type SessionToggle = {
++  touchedAt: number
++  enabled: Record<string, boolean>
++}
++
++type ToggleStore = {
++  version: number
++  migratedAt: number
++  defaults: Record<string, boolean>
++  legacy: Record<string, boolean>
++  sessions: Record<string, SessionToggle>
++}
++
++const isBooleanRecord = (value: unknown): value is Record<string, boolean> =>
++  isRecord(value) && Object.values(value).every((entry) => typeof entry === "boolean")
++
+ const add = Effect.fnUntraced(function* (state: State, match: string, events: EventV2Bridge.Service["Service"]) {
+   const md = yield* Effect.tryPromise({
+     try: () => ConfigMarkdown.parse(match),
+@@ -291,11 +324,164 @@ const layer = Layer.effect(
+       return s.skills[name]
+     })
+ 
+-    const require = Effect.fn("Skill.require")(function* (name: string) {
++    const toggleFile = () => path.join(global.data, TOGGLE_FILE)
++
++    const emptyStore = (): ToggleStore => ({
++      version: TOGGLE_VERSION,
++      migratedAt: Date.now(),
++      defaults: { [BUILTIN_SKILL]: true },
++      legacy: {},
++      sessions: {},
++    })
++
++    let store: ToggleStore = emptyStore()
++
++    const persist = Effect.fn("Skill.persistToggle")(function* () {
++      // Pick up sessions written by another process since we loaded the file so
++      // a toggle in one session does not erase a concurrent one elsewhere.
++      const current = yield* fsys.readFileStringSafe(toggleFile()).pipe(Effect.orElseSucceed(() => undefined))
++      if (current) {
++        let parsed: unknown = null
++        try {
++          parsed = JSON.parse(current)
++        } catch {
++          parsed = null
++        }
++        if (isRecord(parsed) && parsed.version === TOGGLE_VERSION && isRecord(parsed.sessions)) {
++          for (const [id, value] of Object.entries(parsed.sessions)) {
++            if (store.sessions[id]) continue
++            if (!isRecord(value) || !isBooleanRecord(value.enabled)) continue
++            store.sessions[id] = {
++              touchedAt: typeof value.touchedAt === "number" ? value.touchedAt : 0,
++              enabled: value.enabled,
++            }
++          }
++        }
++      }
++
++      const ids = Object.keys(store.sessions)
++      if (ids.length > TOGGLE_KEEP_SESSIONS) {
++        ids
++          .toSorted((a, b) => store.sessions[b].touchedAt - store.sessions[a].touchedAt)
++          .slice(TOGGLE_KEEP_SESSIONS)
++          .forEach((id) => delete store.sessions[id])
++      }
++
++      const file = toggleFile()
++      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
++      yield* fsys.writeWithDirs(tmp, JSON.stringify(store, null, 2), 0o600).pipe(Effect.orDie)
++      // Rename is atomic: a reader never sees a half-written file. On platforms
++      // where the rename is refused, fall back to a direct write.
++      yield* fsys.rename(tmp, file).pipe(
++        Effect.catch((error) =>
++          Effect.gen(function* () {
++            yield* Effect.logWarning("skill toggle atomic rename failed, writing directly", { error })
++            yield* fsys.writeJson(file, store, 0o600).pipe(Effect.orDie)
++          }).pipe(Effect.ensuring(fsys.remove(tmp).pipe(Effect.ignore))),
++        ),
++        Effect.orDie,
++      )
++    })
++
++    const persisted = yield* fsys.readFileStringSafe(toggleFile()).pipe(Effect.orElseSucceed(() => undefined))
 +    if (persisted) {
 +      let parsed: unknown = null
 +      try {
@@ -190,90 +390,211 @@ index 5a04ec2..658497f 100644
 +      } catch {
 +        parsed = null
 +      }
-+      if (isRecord(parsed)) {
-+        for (const [name, value] of Object.entries(parsed)) {
-+          if (typeof value === "boolean") enabled.set(name, value)
++      if (isRecord(parsed) && parsed.version === TOGGLE_VERSION) {
++        const sessions: Record<string, SessionToggle> = {}
++        if (isRecord(parsed.sessions)) {
++          for (const [id, value] of Object.entries(parsed.sessions)) {
++            if (!isRecord(value) || !isBooleanRecord(value.enabled)) continue
++            sessions[id] = {
++              touchedAt: typeof value.touchedAt === "number" ? value.touchedAt : 0,
++              enabled: value.enabled,
++            }
++          }
 +        }
++        store = {
++          version: TOGGLE_VERSION,
++          migratedAt: typeof parsed.migratedAt === "number" ? parsed.migratedAt : Date.now(),
++          defaults: isBooleanRecord(parsed.defaults) ? parsed.defaults : { [BUILTIN_SKILL]: true },
++          legacy: isBooleanRecord(parsed.legacy) ? parsed.legacy : {},
++          sessions,
++        }
++      } else if (isRecord(parsed)) {
++        // v1 stored one flat name→boolean map for every session. Freeze it as
++        // the legacy config so sessions created before this upgrade keep it.
++        const legacy: Record<string, boolean> = {}
++        for (const [name, value] of Object.entries(parsed)) {
++          if (typeof value === "boolean") legacy[name] = value
++        }
++        store = { ...emptyStore(), legacy }
++        yield* persist()
++        yield* Effect.logInfo("skill toggle state migrated", {
++          version: TOGGLE_VERSION,
++          entries: Object.keys(legacy).length,
++        })
 +      }
 +    }
-+    yield* Effect.logInfo("skill toggle state loaded", { count: enabled.size })
-+
-+    const persistToggle = Effect.fn("Skill.persistToggle")(function* () {
-+      yield* fsys.writeJson(toggleFile(), Object.fromEntries(enabled))
++    yield* Effect.logInfo("skill toggle state loaded", {
++      version: store.version,
++      sessions: Object.keys(store.sessions).length,
 +    })
 +
-     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
++    const createdAtOf = (sessionID: string) =>
++      Effect.gen(function* () {
++        const mod = yield* Effect.promise(() => import("@/session/session"))
++        const session = yield* Effect.serviceOption(mod.Session.Service)
++        if (session._tag === "None") return undefined
++        const info = yield* session.value.get(sessionID as never).pipe(Effect.option)
++        if (info._tag === "None") return undefined
++        return info.value.time.created
++      })
++
++    const ensure = Effect.fn("Skill.ensureToggle")(function* (sessionID?: string, createdAt?: number) {
+       const s = yield* InstanceState.get(state)
++      if (!sessionID) return store.defaults
++      const existing = store.sessions[sessionID]
++      if (existing) {
++        existing.touchedAt = Date.now()
++        return existing.enabled
++      }
++      const created = createdAt ?? (yield* createdAtOf(sessionID))
++      // Sessions that predate the per-session format keep the old global config.
++      const useLegacy = created !== undefined && created < store.migratedAt
++      const config: Record<string, boolean> = {}
++      for (const name of Object.keys(s.skills)) {
++        config[name] =
++          name === BUILTIN_SKILL ? true : useLegacy ? store.legacy[name] !== false : store.defaults[name] === true
++      }
++      store.sessions[sessionID] = { touchedAt: Date.now(), enabled: config }
++      yield* persist()
++      return config
++    })
++
++    const isOn = (name: string, config: Record<string, boolean>) =>
++      name === BUILTIN_SKILL || config[name] === true
++
++    const isEnabled = Effect.fn("Skill.isEnabled")(function* (
++      name: string,
++      sessionID?: string,
++      createdAt?: number,
++    ) {
++      return isOn(name, yield* ensure(sessionID, createdAt))
++    })
++
++    const require = Effect.fn("Skill.require")(function* (name: string, sessionID?: string, createdAt?: number) {
++      const s = yield* InstanceState.get(state)
++      const config = yield* ensure(sessionID, createdAt)
+       const info = s.skills[name]
+-      if (info) return info
+-      return yield* new NotFoundError({ name, available: Object.keys(s.skills).toSorted() })
++      if (info && isOn(name, config)) return info
++      return yield* new NotFoundError({
++        name,
++        available: Object.keys(s.skills)
++          .filter((n) => isOn(n, config))
++          .toSorted(),
++      })
+     })
+ 
+     const all = Effect.fn("Skill.all")(function* () {
+@@ -307,14 +493,75 @@ const layer = Layer.effect(
+       return (yield* InstanceState.get(discovered)).dirs
+     })
+ 
+-    const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
++    const available = Effect.fn("Skill.available")(function* (
++      agent?: Agent.Info,
++      sessionID?: string,
++      createdAt?: number,
++    ) {
        const s = yield* InstanceState.get(state)
 -      const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
++      const config = yield* ensure(sessionID, createdAt)
 +      const list = Object.values(s.skills)
-+        .filter((skill) => enabled.get(skill.name) !== false)
++        .filter((skill) => isOn(skill.name, config))
 +        .toSorted((a, b) => a.name.localeCompare(b.name))
        if (!agent) return list
        return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
      })
  
 -    return Service.of({ get, require, all, dirs, available })
-+    const status = Effect.fn("Skill.status")(function* () {
++    const status = Effect.fn("Skill.status")(function* (sessionID?: string, createdAt?: number) {
 +      const s = yield* InstanceState.get(state)
++      const config = yield* ensure(sessionID, createdAt)
 +      const result: Record<string, boolean> = {}
 +      for (const name of Object.keys(s.skills)) {
-+        result[name] = enabled.get(name) !== false
++        result[name] = isOn(name, config)
 +      }
 +      return result
 +    })
 +
-+    const enable = Effect.fn("Skill.enable")(function* (name: string) {
++    const enable = Effect.fn("Skill.enable")(function* (name: string, sessionID?: string, createdAt?: number) {
 +      const s = yield* InstanceState.get(state)
++      const config = yield* ensure(sessionID, createdAt)
 +      if (!(name in s.skills)) {
 +        yield* Effect.logInfo("skill enable skipped (not found)", { name })
 +        return false
 +      }
-+      if (enabled.get(name) === true) {
++      if (name === BUILTIN_SKILL) {
++        yield* Effect.logInfo("skill enable skipped (built-in always enabled)", { name })
++        return false
++      }
++      if (config[name] === true) {
 +        yield* Effect.logInfo("skill already enabled", { name })
 +        return false
 +      }
-+      enabled.set(name, true)
-+      yield* persistToggle()
-+      yield* Effect.logInfo("skill enabled", { name })
++      config[name] = true
++      if (sessionID && store.sessions[sessionID]) store.sessions[sessionID].touchedAt = Date.now()
++      yield* persist()
++      yield* Effect.logInfo("skill enabled", { name, session: sessionID })
 +      return true
 +    })
 +
-+    const disable = Effect.fn("Skill.disable")(function* (name: string) {
++    const disable = Effect.fn("Skill.disable")(function* (name: string, sessionID?: string, createdAt?: number) {
 +      const s = yield* InstanceState.get(state)
++      const config = yield* ensure(sessionID, createdAt)
 +      if (!(name in s.skills)) {
 +        yield* Effect.logInfo("skill disable skipped (not found)", { name })
 +        return false
 +      }
-+      if (enabled.get(name) === false) {
++      if (name === BUILTIN_SKILL) {
++        yield* Effect.logInfo("skill disable skipped (built-in always enabled)", { name })
++        return false
++      }
++      if (config[name] === false) {
 +        yield* Effect.logInfo("skill already disabled", { name })
 +        return false
 +      }
-+      enabled.set(name, false)
-+      yield* persistToggle()
-+      yield* Effect.logInfo("skill disabled", { name })
++      config[name] = false
++      if (sessionID && store.sessions[sessionID]) store.sessions[sessionID].touchedAt = Date.now()
++      yield* persist()
++      yield* Effect.logInfo("skill disabled", { name, session: sessionID })
 +      return true
 +    })
 +
-+    return Service.of({ get, require, all, dirs, available, status, enable, disable })
++    return Service.of({ get, require, all, dirs, available, status, enable, disable, isEnabled })
    }),
  )
  
+diff --git a/packages/opencode/src/tool/skill.ts b/packages/opencode/src/tool/skill.ts
+index 9149bcc..9ced91b 100644
+--- a/packages/opencode/src/tool/skill.ts
++++ b/packages/opencode/src/tool/skill.ts
+@@ -21,7 +21,7 @@ export const SkillTool = Tool.define(
+       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
+         Effect.gen(function* () {
+           const info = yield* skill
+-            .require(params.name)
++            .require(params.name, ctx.sessionID)
+             .pipe(Effect.catchTag("Skill.NotFoundError", (error) => Effect.die(new Error(error.message))))
+ 
+           yield* ctx.ask({
 diff --git a/packages/opencode/test/session/system.test.ts b/packages/opencode/test/session/system.test.ts
-index 09bac3f..ad34ec0 100644
+index 09bac3f..2a14abe 100644
 --- a/packages/opencode/test/session/system.test.ts
 +++ b/packages/opencode/test/session/system.test.ts
-@@ -77,6 +77,9 @@ const it = testEffect(
+@@ -77,6 +77,10 @@ const it = testEffect(
            all: () => Effect.succeed(skills),
            dirs: () => Effect.succeed([]),
            available: () => Effect.succeed(skills),
 +          status: () => Effect.succeed(Object.fromEntries(skills.map((skill) => [skill.name, true]))),
 +          enable: () => Effect.succeed(true),
 +          disable: () => Effect.succeed(true),
++          isEnabled: () => Effect.succeed(true),
          }),
        ),
      ],
 diff --git a/packages/sdk/js/src/v2/gen/sdk.gen.ts b/packages/sdk/js/src/v2/gen/sdk.gen.ts
-index a2bcd42..7c87448 100644
+index a2bcd42..4288050 100644
 --- a/packages/sdk/js/src/v2/gen/sdk.gen.ts
 +++ b/packages/sdk/js/src/v2/gen/sdk.gen.ts
 @@ -111,6 +111,12 @@ import type {
@@ -289,52 +610,146 @@ index a2bcd42..7c87448 100644
    ModelRef,
    MoveSessionDestination,
    OutputFormat,
-@@ -6525,27 +6525,121 @@ export class Skill extends HeyApiClient {
--export class Skill extends HeyApiClient {
--  /**
--   * List skills
--   *
--   * Retrieve currently registered skills.
--   */
--  public list<ThrowOnError extends boolean = false>(
--    parameters?: {
--      location?: {
--        directory?: string
--        workspace?: string
--      }
--    },
--    options?: Options<never, ThrowOnError>,
--  ) {
--    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
--    return (options?.client ?? this.client).get<V2SkillListResponses, V2SkillListErrors, ThrowOnError>({
--      url: "/api/skill",
--      ...options,
--      ...params,
--    })
--  }
--}
-+export class Skill extends HeyApiClient {
-+  /**
-+   * List skills
-+   *
-+   * Retrieve currently registered skills.
-+   */
-+  public list<ThrowOnError extends boolean = false>(
-+    parameters?: {
-+      location?: {
-+        directory?: string
-+        workspace?: string
-+      }
-+    },
-+    options?: Options<never, ThrowOnError>,
-+  ) {
-+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
-+    return (options?.client ?? this.client).get<V2SkillListResponses, V2SkillListErrors, ThrowOnError>({
-+      url: "/api/skill",
-+      ...options,
-+      ...params,
-+    })
-+  }
+@@ -1128,6 +1134,7 @@ export class Workspace extends HeyApiClient {
+     parameters?: {
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -1900,6 +1907,7 @@ export class File extends HeyApiClient {
+     parameters?: {
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2058,6 +2066,7 @@ export class Vcs extends HeyApiClient {
+     parameters?: {
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2198,6 +2207,7 @@ export class Lsp extends HeyApiClient {
+     parameters?: {
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2230,6 +2240,7 @@ export class Formatter extends HeyApiClient {
+     parameters?: {
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2263,6 +2274,7 @@ export class Auth2 extends HeyApiClient {
+       name: string
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2274,6 +2286,7 @@ export class Auth2 extends HeyApiClient {
+             { in: "path", key: "name" },
+             { in: "query", key: "directory" },
+             { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
+           ],
+         },
+       ],
+@@ -2295,6 +2308,7 @@ export class Auth2 extends HeyApiClient {
+       name: string
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2306,6 +2320,7 @@ export class Auth2 extends HeyApiClient {
+             { in: "path", key: "name" },
+             { in: "query", key: "directory" },
+             { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
+           ],
+         },
+       ],
+@@ -2366,6 +2381,7 @@ export class Auth2 extends HeyApiClient {
+       name: string
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2377,6 +2393,7 @@ export class Auth2 extends HeyApiClient {
+             { in: "path", key: "name" },
+             { in: "query", key: "directory" },
+             { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
+           ],
+         },
+       ],
+@@ -2401,6 +2418,7 @@ export class Mcp extends HeyApiClient {
+     parameters?: {
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2469,6 +2487,7 @@ export class Mcp extends HeyApiClient {
+       name: string
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2480,6 +2499,7 @@ export class Mcp extends HeyApiClient {
+             { in: "path", key: "name" },
+             { in: "query", key: "directory" },
+             { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
+           ],
+         },
+       ],
+@@ -2499,6 +2519,7 @@ export class Mcp extends HeyApiClient {
+       name: string
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -2510,6 +2531,7 @@ export class Mcp extends HeyApiClient {
+             { in: "path", key: "name" },
+             { in: "query", key: "directory" },
+             { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
+           ],
+         },
+       ],
+@@ -3466,6 +3488,7 @@ export class Session2 extends HeyApiClient {
+     parameters?: {
+       directory?: string
+       workspace?: string
++      session?: string
+     },
+     options?: Options<never, ThrowOnError>,
+   ) {
+@@ -6544,6 +6567,106 @@ export class Skill extends HeyApiClient {
+       ...params,
+     })
+   }
 +
 +  /**
 +   * Get skill status
@@ -345,6 +760,7 @@ index a2bcd42..7c87448 100644
 +    parameters?: {
 +      directory?: string
 +      workspace?: string
++      session?: string
 +    },
 +    options?: Options<never, ThrowOnError>,
 +  ) {
@@ -355,6 +771,7 @@ index a2bcd42..7c87448 100644
 +          args: [
 +            { in: "query", key: "directory" },
 +            { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
 +          ],
 +        },
 +      ],
@@ -376,6 +793,7 @@ index a2bcd42..7c87448 100644
 +      name: string
 +      directory?: string
 +      workspace?: string
++      session?: string
 +    },
 +    options?: Options<never, ThrowOnError>,
 +  ) {
@@ -387,6 +805,7 @@ index a2bcd42..7c87448 100644
 +            { in: "path", key: "name" },
 +            { in: "query", key: "directory" },
 +            { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
 +          ],
 +        },
 +      ],
@@ -408,6 +827,7 @@ index a2bcd42..7c87448 100644
 +      name: string
 +      directory?: string
 +      workspace?: string
++      session?: string
 +    },
 +    options?: Options<never, ThrowOnError>,
 +  ) {
@@ -419,6 +839,7 @@ index a2bcd42..7c87448 100644
 +            { in: "path", key: "name" },
 +            { in: "query", key: "directory" },
 +            { in: "query", key: "workspace" },
++            { in: "query", key: "session" },
 +          ],
 +        },
 +      ],
@@ -429,12 +850,10 @@ index a2bcd42..7c87448 100644
 +      ...params,
 +    })
 +  }
-+}
+ }
  
  export class Event2 extends HeyApiClient {
-   /**
-    * Subscribe to events
-@@ -7167,6 +7267,11 @@ export class OpencodeClient extends HeyApiClient {
+@@ -7167,6 +7290,11 @@ export class OpencodeClient extends HeyApiClient {
      return (this._mcp ??= new Mcp({ client: this.client }))
    }
  
@@ -447,10 +866,10 @@ index a2bcd42..7c87448 100644
    get project(): Project {
      return (this._project ??= new Project({ client: this.client }))
 diff --git a/packages/sdk/js/src/v2/gen/types.gen.ts b/packages/sdk/js/src/v2/gen/types.gen.ts
-index f06c20c..c7cf98e 100644
+index 5ac9bd7..1077702 100644
 --- a/packages/sdk/js/src/v2/gen/types.gen.ts
 +++ b/packages/sdk/js/src/v2/gen/types.gen.ts
-@@ -8705,6 +8705,96 @@ export type McpDisconnectResponses = {
+@@ -8722,6 +8722,99 @@ export type McpDisconnectResponses = {
  
  export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
  
@@ -460,6 +879,7 @@ index f06c20c..c7cf98e 100644
 +  query?: {
 +    directory?: string
 +    workspace?: string
++    session?: string
 +  }
 +  url: "/skill/status"
 +}
@@ -492,6 +912,7 @@ index f06c20c..c7cf98e 100644
 +  query?: {
 +    directory?: string
 +    workspace?: string
++    session?: string
 +  }
 +  url: "/skill/{name}/enable"
 +}
@@ -522,6 +943,7 @@ index f06c20c..c7cf98e 100644
 +  query?: {
 +    directory?: string
 +    workspace?: string
++    session?: string
 +  }
 +  url: "/skill/{name}/disable"
 +}
@@ -548,7 +970,7 @@ index f06c20c..c7cf98e 100644
    body?: never
    path?: never
 diff --git a/packages/tui/src/app.tsx b/packages/tui/src/app.tsx
-index 3f1da52..b5fe172 100644
+index 1b21aaf..181602d 100644
 --- a/packages/tui/src/app.tsx
 +++ b/packages/tui/src/app.tsx
 @@ -42,6 +42,7 @@ import { PermissionProvider } from "./context/permission"
@@ -559,7 +981,7 @@ index 3f1da52..b5fe172 100644
  import { DialogStatus } from "./component/dialog-status"
  import { DialogDebug } from "./component/dialog-debug"
  import { DialogThemeList } from "./component/dialog-theme-list"
-@@ -112,6 +113,7 @@ const appBindingCommands = [
+@@ -111,6 +112,7 @@ const appBindingCommands = [
    "model.cycle_favorite_reverse",
    "agent.list",
    "mcp.list",
@@ -567,7 +989,7 @@ index 3f1da52..b5fe172 100644
    "agent.cycle",
    "agent.cycle.reverse",
    "variant.cycle",
-@@ -692,6 +694,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
+@@ -680,6 +682,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
            dialog.replace(() => <DialogMcp />)
          },
        },
@@ -584,7 +1006,7 @@ index 3f1da52..b5fe172 100644
          name: "agent.cycle",
          title: "Agent cycle",
 diff --git a/packages/tui/src/component/dialog-mcp.tsx b/packages/tui/src/component/dialog-mcp.tsx
-index c48c0f8..a0d38e6 100644
+index c48c0f8..354de74 100644
 --- a/packages/tui/src/component/dialog-mcp.tsx
 +++ b/packages/tui/src/component/dialog-mcp.tsx
 @@ -3,19 +3,20 @@ import { useLocal } from "../context/local"
@@ -613,7 +1035,7 @@ index c48c0f8..a0d38e6 100644
  }
  
  export function DialogMcp() {
-@@ -24,11 +25,12 @@ export function DialogMcp() {
+@@ -24,6 +25,7 @@ export function DialogMcp() {
    const sdk = useSDK()
    const [, setRef] = createSignal<DialogSelectRef<unknown>>()
    const [loading, setLoading] = createSignal<string | null>(null)
@@ -621,12 +1043,7 @@ index c48c0f8..a0d38e6 100644
  
    const options = createMemo(() => {
      // Track sync data and loading state to trigger re-render when they change
-     const mcpData = sync.data.mcp
-     const loadingMcp = loading()
- 
-     return pipe(
-       mcpData ?? {},
-@@ -38,7 +41,9 @@ export function DialogMcp() {
+@@ -38,7 +40,9 @@ export function DialogMcp() {
          value: name,
          title: name,
          description: status.status === "failed" ? "failed" : status.status,
@@ -637,7 +1054,7 @@ index c48c0f8..a0d38e6 100644
          category: undefined,
        })),
      )
-@@ -77,6 +82,7 @@ export function DialogMcp() {
+@@ -77,6 +81,7 @@ export function DialogMcp() {
        title="MCPs"
        options={options()}
        actions={actions()}
@@ -647,10 +1064,10 @@ index c48c0f8..a0d38e6 100644
        }}
 diff --git a/packages/tui/src/component/dialog-skill-toggle.tsx b/packages/tui/src/component/dialog-skill-toggle.tsx
 new file mode 100644
-index 0000000..9fc43e2
+index 0000000..9aea506
 --- /dev/null
 +++ b/packages/tui/src/component/dialog-skill-toggle.tsx
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,79 @@
 +import { createMemo, createSignal } from "solid-js"
 +import { useLocal } from "../context/local"
 +import { useSync } from "../context/sync"
@@ -658,7 +1075,6 @@ index 0000000..9fc43e2
 +import { DialogSelect, type DialogSelectRef, type DialogSelectOption } from "../ui/dialog-select"
 +import { useTheme, selectedForeground } from "../context/theme"
 +import { TextAttributes } from "@opentui/core"
-+import { useSDK } from "../context/sdk"
 +
 +function Status(props: { enabled: boolean; loading: boolean; active: () => boolean }) {
 +  const { theme } = useTheme()
@@ -675,7 +1091,6 @@ index 0000000..9fc43e2
 +export function DialogSkillToggle() {
 +  const local = useLocal()
 +  const sync = useSync()
-+  const sdk = useSDK()
 +  const [, setRef] = createSignal<DialogSelectRef<unknown>>()
 +  const [loading, setLoading] = createSignal<string | null>(null)
 +  const [active, setActive] = createSignal<string>()
@@ -710,13 +1125,6 @@ index 0000000..9fc43e2
 +        setLoading(option.value)
 +        try {
 +          await local.skill.toggle(option.value)
-+          // Refresh skill status from server
-+          const status = await sdk.client.skill.status()
-+          if (status.data) {
-+            sync.set("skill", status.data)
-+          } else {
-+            console.error("Failed to refresh skill status: no data returned")
-+          }
 +        } catch (error) {
 +          console.error("Failed to toggle skill:", error)
 +        } finally {
@@ -741,10 +1149,10 @@ index 0000000..9fc43e2
 +}
 \ No newline at end of file
 diff --git a/packages/tui/src/component/dialog-status.tsx b/packages/tui/src/component/dialog-status.tsx
-index 6c8fabd..3471175 100644
+index 1adab3e..ede2bca 100644
 --- a/packages/tui/src/component/dialog-status.tsx
 +++ b/packages/tui/src/component/dialog-status.tsx
-@@ -118,6 +118,29 @@ export function DialogStatus() {
+@@ -119,6 +119,29 @@ export function DialogStatus() {
            </For>
          </box>
        )}
@@ -774,6 +1182,19 @@ index 6c8fabd..3471175 100644
        <Show when={enabledFormatters().length > 0} fallback={<text fg={theme.text}>No Formatters</text>}>
          <box>
            <text fg={theme.text}>{enabledFormatters().length} Formatters</text>
+diff --git a/packages/tui/src/component/prompt/autocomplete.tsx b/packages/tui/src/component/prompt/autocomplete.tsx
+index 099fa9d..3b5ad64 100644
+--- a/packages/tui/src/component/prompt/autocomplete.tsx
++++ b/packages/tui/src/component/prompt/autocomplete.tsx
+@@ -448,7 +448,7 @@ export function Autocomplete(props: {
+     const results: AutocompleteOption[] = [...slashes()]
+ 
+     for (const serverCommand of sync.data.command) {
+-      if (serverCommand.source === "skill") continue
++      if (serverCommand.source === "skill" && sync.data.skill[serverCommand.name] === false) continue
+       const label = serverCommand.source === "mcp" ? ":mcp" : ""
+       results.push({
+         display: "/" + serverCommand.name + label,
 diff --git a/packages/tui/src/config/keybind.ts b/packages/tui/src/config/keybind.ts
 index 5dd7e4b..8097468 100644
 --- a/packages/tui/src/config/keybind.ts
@@ -803,10 +1224,32 @@ index 5dd7e4b..8097468 100644
    console_org_switch: "console.org.switch",
    agent_list: "agent.list",
 diff --git a/packages/tui/src/context/local.tsx b/packages/tui/src/context/local.tsx
-index a05d315..3f68fd6 100644
+index a05d315..4142129 100644
 --- a/packages/tui/src/context/local.tsx
 +++ b/packages/tui/src/context/local.tsx
-@@ -519,6 +519,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+@@ -1,4 +1,4 @@
+-import { createStore } from "solid-js/store"
++import { createStore, reconcile } from "solid-js/store"
+ import { createSimpleContext } from "./helper"
+ import { batch, createEffect, createMemo } from "solid-js"
+ import { useSync } from "./sync"
+@@ -12,6 +12,7 @@ import { readJson, writeJsonAtomic } from "../util/persistence"
+ import { useTheme } from "./theme"
+ import { useToast } from "../ui/toast"
+ import { useRoute } from "./route"
++import { useProject } from "./project"
+ import { usePermission } from "./permission"
+ 
+ export type LocalTheme = {
+@@ -56,6 +57,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+     const toast = useToast()
+     const theme = useTheme().theme
+     const route = useRoute()
++    const project = useProject()
+     const paths = useTuiPaths()
+     const args = useArgs()
+     const event = useEvent()
+@@ -519,6 +521,28 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
        },
      }
  
@@ -815,21 +1258,27 @@ index a05d315..3f68fd6 100644
 +        return sync.data.skill[name] !== false
 +      },
 +      async toggle(name: string) {
++        const session = route.data.type === "session" ? route.data.sessionID : undefined
 +        const enabled = sync.data.skill[name] !== false
-+        if (enabled) {
-+          await sdk.client.skill.disable({ name })
-+          sync.set("skill", name, false)
-+        } else {
-+          await sdk.client.skill.enable({ name })
-+          sync.set("skill", name, true)
++        const target = {
++          name,
++          workspace: project.workspace.current(),
++          ...(session ? { session } : {}),
 +        }
++        if (enabled) await sdk.client.skill.disable(target)
++        else await sdk.client.skill.enable(target)
++        const status = await sdk.client.skill.status({
++          workspace: project.workspace.current(),
++          ...(session ? { session } : {}),
++        })
++        sync.set("skill", reconcile(status.data ?? {}))
 +      },
 +    }
 +
      createEffect(() => {
        const value = agent.current()
        if (!value?.model) return
-@@ -534,6 +550,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+@@ -534,6 +558,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
        model,
        agent,
        mcp,
@@ -838,10 +1287,23 @@ index a05d315..3f68fd6 100644
        permission,
      }
 diff --git a/packages/tui/src/context/sync.tsx b/packages/tui/src/context/sync.tsx
-index 71e050d..59732c5 100644
+index 71e050d..5fe81a1 100644
 --- a/packages/tui/src/context/sync.tsx
 +++ b/packages/tui/src/context/sync.tsx
-@@ -109,6 +109,9 @@ export const {
+@@ -28,10 +28,11 @@ import { useTuiStartup } from "./runtime"
+ import { createSimpleContext } from "./helper"
+ import { useExit } from "./exit"
+ import { useArgs } from "./args"
+-import { batch, onMount } from "solid-js"
++import { batch, createEffect, onMount } from "solid-js"
+ import path from "path"
+ import { useKV } from "./kv"
+ import { usePermission } from "./permission"
++import { useRoute } from "./route"
+ 
+ const emptyConsoleState: ConsoleState = {
+   consoleManagedProviders: [],
+@@ -109,6 +110,9 @@ export const {
        mcp_resource: {
          [key: string]: McpResource
        }
@@ -851,7 +1313,7 @@ index 71e050d..59732c5 100644
        formatter: FormatterStatus[]
        vcs: VcsInfo | undefined
      }>({
-@@ -139,6 +142,7 @@ export const {
+@@ -139,6 +143,7 @@ export const {
        lsp: [],
        mcp: {},
        mcp_resource: {},
@@ -859,11 +1321,36 @@ index 71e050d..59732c5 100644
        formatter: [],
        vcs: undefined,
      })
-@@ -523,6 +527,7 @@ export const {
+@@ -146,6 +151,24 @@ export const {
+     const event = useEvent()
+     const project = useProject()
+     const sdk = useSDK()
++    const route = useRoute()
++
++    // Skill state is per session: fetch it for the session currently on screen
++    // (or the defaults for new sessions when there is none).
++    const refreshSkill = async () => {
++      const id = route.data.type === "session" ? route.data.sessionID : undefined
++      const result = await sdk.client.skill.status({
++        workspace: project.workspace.current(),
++        ...(id ? { session: id } : {}),
++      })
++      setStore("skill", reconcile(result.data ?? {}))
++    }
++
++    createEffect(() => {
++      const id = route.data.type === "session" ? route.data.sessionID : undefined
++      void id
++      void refreshSkill()
++    })
+ 
+     const fullSyncedSessions = new Set<string>()
+     const syncingSessions = new Map<string, Promise<void>>()
+@@ -523,6 +546,7 @@ export const {
              sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
              sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),
              sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {}))),
-+            sdk.client.skill.status({ workspace }).then((x) => setStore("skill", reconcile(x.data ?? {}))),
++            refreshSkill(),
              sdk.client.experimental.resource
                .list({ workspace })
                .then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
