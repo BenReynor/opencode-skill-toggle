@@ -26,6 +26,39 @@ function Write-Step($Msg) {
   Write-Host ">> $Msg"
 }
 
+# Downloads a helper script from the resolved release and verifies it against
+# SHA256SUMS.scripts when that file exists (older releases do not have it).
+function Install-ScriptFromRelease([string]$Name) {
+  $Dest = Join-Path $HOME ".opencode\$Name"
+  $Tmp = Join-Path $env:TEMP "$Name.$PID.download"
+  $Sums = Join-Path $env:TEMP "SHA256SUMS.scripts.$PID"
+  try {
+    Invoke-WebRequest -Uri "$ReleaseBase/$Name" -OutFile $Tmp -UseBasicParsing -ErrorAction Stop
+    $Expected = $null
+    try {
+      Invoke-WebRequest -Uri "$ReleaseBase/SHA256SUMS.scripts" -OutFile $Sums -UseBasicParsing -ErrorAction Stop
+      $Line = Get-Content -LiteralPath $Sums |
+        Where-Object { $_ -match "\s+$([regex]::Escape($Name))\s*$" } |
+        Select-Object -First 1
+      if ($Line) { $Expected = ($Line -split '\s+')[0].ToLower() }
+    } catch {
+      Write-Warning "No SHA256SUMS.scripts for this release; $Name will not be verified"
+    }
+    if ($Expected) {
+      $Actual = (Get-FileHash -LiteralPath $Tmp -Algorithm SHA256).Hash.ToLower()
+      if ($Actual -ne $Expected) { throw "SHA256 verification failed for $Name" }
+    }
+    Move-Item -LiteralPath $Tmp -Destination $Dest -Force
+    return $Dest
+  } catch {
+    Write-Warning "Could not install ${Name}: $_"
+    return $null
+  } finally {
+    Remove-Item -LiteralPath $Tmp -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Sums -Force -ErrorAction SilentlyContinue
+  }
+}
+
 # --- Detect platform --------------------------------------------------------
 $arch = $env:PROCESSOR_ARCHITECTURE
 if (-not $arch) {
@@ -147,21 +180,16 @@ if ($PSScriptRoot) {
 }
 if (-not (Test-Path -LiteralPath $Cleanup)) {
   Write-Step "Downloading toggle-cleanup.ps1"
-  # Download to a temporary file and move it: a failed download must never
-  # leave a truncated (unusable) script behind.
-  $TmpCleanup = Join-Path $env:TEMP "toggle-cleanup.download"
-  try {
-    Invoke-WebRequest -Uri "$ReleaseBase/toggle-cleanup.ps1" -OutFile $TmpCleanup -UseBasicParsing -ErrorAction Stop
-    Move-Item -LiteralPath $TmpCleanup -Destination $Cleanup -Force
-  } catch {
-    Write-Warning "Could not download toggle-cleanup.ps1"
-  } finally {
-    Remove-Item -LiteralPath $TmpCleanup -Force -ErrorAction SilentlyContinue
-  }
+  Install-ScriptFromRelease "toggle-cleanup.ps1" | Out-Null
 }
 if (Test-Path -LiteralPath $Cleanup) {
   try {
-    & $Cleanup
+    $PrevKeep = $env:TOGGLE_CLEANUP_KEEP_BACKUP
+    $env:TOGGLE_CLEANUP_KEEP_BACKUP = "1"
+    try { & $Cleanup } finally {
+      if ($null -eq $PrevKeep) { Remove-Item Env:\TOGGLE_CLEANUP_KEEP_BACKUP -ErrorAction SilentlyContinue }
+      else { $env:TOGGLE_CLEANUP_KEEP_BACKUP = $PrevKeep }
+    }
     Write-Step "Residues of previous versions removed"
   } catch {
     Write-Warning "The residue cleanup did not finish properly; retry with: powershell -File `"$Cleanup`""
@@ -176,16 +204,9 @@ if ($env:TOGGLE_GUARD -ne "0") {
     Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
   } else {
     Write-Step "Downloading toggle-guard.ps1"
-    # Same as above: download to a temporary file, then move it into place.
-    $TmpGuard = Join-Path $env:TEMP "toggle-guard.download"
-    try {
-      Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $TmpGuard -UseBasicParsing -ErrorAction Stop
-      Move-Item -LiteralPath $TmpGuard -Destination $Guard -Force
-    } catch {
+    if (-not (Install-ScriptFromRelease "toggle-guard.ps1")) {
       Write-Warning "Could not download toggle-guard.ps1; the anti-overwrite guard will NOT be installed"
       $Guard = $null
-    } finally {
-      Remove-Item -LiteralPath $TmpGuard -Force -ErrorAction SilentlyContinue
     }
   }
   if (-not $Guard) {

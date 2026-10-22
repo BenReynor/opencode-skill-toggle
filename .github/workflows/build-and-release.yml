@@ -31,6 +31,13 @@ permissions:
   contents: write
   issues: write
 
+# Serialize runs: the installers/guard resolve the newest toggle-* tag, so a
+# second concurrent build could publish a tag that is no longer the one the
+# smoke test validated.
+concurrency:
+  group: build-and-release
+  cancel-in-progress: false
+
 jobs:
   detect:
     runs-on: ubuntu-latest
@@ -40,7 +47,14 @@ jobs:
       published: ${{ steps.resolve.outputs.published }}
       build_tag: ${{ steps.resolve.outputs.build_tag }}
       download_tag: ${{ steps.resolve.outputs.download_tag }}
+      patch_sha: ${{ steps.resolve.outputs.patch_sha }}
+      need_build: ${{ steps.resolve.outputs.need_build }}
     steps:
+      - name: Checkout repo (for patches)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
       - name: Resolve version
         id: resolve
         env:
@@ -52,20 +66,30 @@ jobs:
             V="$(gh api repos/anomalyco/opencode/releases/latest --jq .tag_name | sed 's/^v//')"
           fi
           PUBLISHED="$(gh release view "toggle-$V" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || echo '')"
+          # A different patch set means the published binary is stale even when
+          # the version is already there: rebuild without waiting for a new
+          # upstream release.
+          PATCH_SHA="$(cat patches/*.patch | sha256sum | awk '{print $1}')"
+          REMOTE_PATCH_SHA="$(gh release download "toggle-$V" --repo "$GITHUB_REPOSITORY" \
+            --pattern PATCH_SHA256 --output - 2>/dev/null || true)"
+          NEED_BUILD=0
+          if [ "${{ github.event.inputs.force }}" = "true" ] || [ -z "$PUBLISHED" ] || [ "$PATCH_SHA" != "$REMOTE_PATCH_SHA" ]; then
+            NEED_BUILD=1
+          fi
           # Each build goes to a UNIQUE TAG: a new version is published to
-          # toggle-$V; a forced rebuild to toggle-$V-r<run>. Thus the content of
-          # every release never changes, avoiding mixed old/new binaries in the
-          # CDN cache (the problem with overwriting "latest" or "toggle-$V"
-          # with --clobber).
-          if [ -n "$PUBLISHED" ]; then
+          # toggle-$V; a rebuild to toggle-$V-r<run>. Thus the content of every
+          # release never changes, avoiding mixed old/new binaries in the CDN
+          # cache (the problem with overwriting "latest" or "toggle-$V" with
+          # --clobber).
+          if [ "$NEED_BUILD" = "1" ] && [ -n "$PUBLISHED" ]; then
             BUILD_TAG="toggle-${V}-r${{ github.run_number }}"
           else
             BUILD_TAG="toggle-$V"
           fi
           # Where smoke tests must download from: if build runs it validates the
           # freshly built binaries (BUILD_TAG); if build is skipped (already
-          # published, no force) it validates the existing release instead.
-          if [ "${{ github.event.inputs.force }}" = "true" ] || [ -z "$PUBLISHED" ]; then
+          # published with the same patches) it validates the existing release.
+          if [ "$NEED_BUILD" = "1" ]; then
             DOWNLOAD_TAG="$BUILD_TAG"
           else
             DOWNLOAD_TAG="toggle-$V"
@@ -75,15 +99,18 @@ jobs:
           echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
           echo "build_tag=$BUILD_TAG" >> "$GITHUB_OUTPUT"
           echo "download_tag=$DOWNLOAD_TAG" >> "$GITHUB_OUTPUT"
+          echo "patch_sha=$PATCH_SHA" >> "$GITHUB_OUTPUT"
+          echo "need_build=$NEED_BUILD" >> "$GITHUB_OUTPUT"
 
   build:
     needs: detect
-    if: ${{ (github.event.inputs.force == 'true') || (needs.detect.outputs.published == '') }}
+    if: ${{ needs.detect.outputs.need_build == '1' }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VERSION: ${{ needs.detect.outputs.version }}
       BUILD_TAG: ${{ needs.detect.outputs.build_tag }}
+      PATCH_SHA: ${{ needs.detect.outputs.patch_sha }}
     steps:
       - name: Checkout repo (for patches)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -106,10 +133,16 @@ jobs:
           for p in "$GITHUB_WORKSPACE"/patches/*.patch; do
             echo ">> Applying $p"
             if ! git apply --3way "$p"; then
-              gh issue create \
-                --repo "$GITHUB_REPOSITORY" \
-                --title "Patches need update for ${{ needs.detect.outputs.tag }}" \
-                --body "git apply --3way failed for \`$p\` on opencode \`${{ needs.detect.outputs.tag }}\`. Update the patch or adapt it."
+              TITLE="Patches need update for ${{ needs.detect.outputs.tag }}"
+              EXISTING="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+                --search "\"$TITLE\" in:title" --json number,title \
+                --jq ".[] | select(.title == \"$TITLE\") | .number" | head -n1)"
+              BODY="\`git apply --3way\` failed for \`$p\` on opencode \`${{ needs.detect.outputs.tag }}\`. Update the patch or adapt it. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              if [ -n "$EXISTING" ]; then
+                gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+              else
+                gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+              fi
               echo "::error::patch apply failed for $p on ${{ needs.detect.outputs.tag }}"
               exit 1
             fi
@@ -152,15 +185,8 @@ jobs:
           cd "$DEST"
           sha256sum opencode-* > SHA256SUMS
           ASSETS+=("$DEST/SHA256SUMS")
-          for f in "$GITHUB_WORKSPACE/install.sh" "$GITHUB_WORKSPACE/install.ps1" \
-                   "$GITHUB_WORKSPACE/scripts/toggle-guard.sh" "$GITHUB_WORKSPACE/scripts/toggle-guard.ps1" \
-                   "$GITHUB_WORKSPACE/scripts/toggle-cleanup.sh" "$GITHUB_WORKSPACE/scripts/toggle-cleanup.ps1"; do
-            if [ -f "$f" ]; then
-              ASSETS+=("$f")
-            else
-              echo ">> warning: $f does not exist, skipping"
-            fi
-          done
+          printf '%s\n' "$PATCH_SHA" > "$DEST/PATCH_SHA256"
+          ASSETS+=("$DEST/PATCH_SHA256")
           if gh release view "$BUILD_TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
             gh release upload "$BUILD_TAG" --repo "$GITHUB_REPOSITORY" "${ASSETS[@]}" --clobber
           else
@@ -200,21 +226,66 @@ jobs:
               --notes "Binaries of the latest version compiled with skill-toggle. Download \`opencode-<platform>\` and verify against SHA256SUMS."
           fi
 
-      - name: Upload installers and guards to the latest release
+  # Scripts are published independently of the binary build: a change to
+  # install.sh/scripts/** must reach users even when the version was already
+  # built (build skipped). They go to the release the installers resolve
+  # (download_tag) and to "latest" for the one-line install commands.
+  publish-scripts:
+    needs: [detect, build]
+    if: ${{ always() && needs.detect.result == 'success' && needs.build.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Checksum the scripts
+        run: |
+          cd "$GITHUB_WORKSPACE/scripts"
+          sha256sum toggle-guard.sh toggle-guard.ps1 toggle-cleanup.sh toggle-cleanup.ps1 \
+            > "$RUNNER_TEMP/SHA256SUMS.scripts"
+
+      - name: Publish installers and guards
+        env:
+          TAG: ${{ needs.detect.outputs.download_tag }}
         run: |
           FILES=()
-          for f in install.sh install.ps1 scripts/toggle-guard.sh scripts/toggle-guard.ps1 scripts/toggle-cleanup.sh scripts/toggle-cleanup.ps1; do
+          for f in install.sh install.ps1 scripts/toggle-guard.sh scripts/toggle-guard.ps1 \
+                   scripts/toggle-cleanup.sh scripts/toggle-cleanup.ps1; do
             if [ -f "$GITHUB_WORKSPACE/$f" ]; then
               FILES+=("$GITHUB_WORKSPACE/$f")
             else
-              echo ">> warning: $f not present in the repo, skipping"
+              echo "::error::$f is missing"
+              exit 1
             fi
           done
+          FILES+=("$RUNNER_TEMP/SHA256SUMS.scripts")
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
+            echo "::error::release $TAG does not exist; cannot publish scripts"
+            exit 1
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --clobber
           if gh release view latest --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
             gh release upload latest --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --clobber
-          else
-            gh release create latest --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --title "latest" --notes "installer"
           fi
+
+      - name: Close stale patch issues after a successful build
+        if: ${{ needs.build.result == 'success' || needs.build.result == 'skipped' }}
+        run: |
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search '"Patches need update" in:title' --json number,title \
+            --jq '.[] | select(.title | startswith("Patches need update")) | .number' |
+          while read -r n; do
+            [ -n "$n" ] || continue
+            gh issue close "$n" --repo "$GITHUB_REPOSITORY" \
+              --comment "Fixed: the patches apply again on opencode ${{ needs.detect.outputs.tag }}."
+          done
 
   smoke:
     name: Smoke ${{ matrix.platform }}

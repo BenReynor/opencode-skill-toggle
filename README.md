@@ -5,7 +5,8 @@
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20·%20macOS%20·%20Windows-informational)
 
 > 🎚️ **opencode with a toggle for every skill.** Enable or disable each skill
-> independently and it **remembers your choice** between restarts.
+> independently **per session**, and each session remembers its own choice
+> between restarts.
 
 Keep all the skills you want installed, but only the ones you have **enabled**
 are actually loaded. Disabled skills stop cluttering the model's suggestions and
@@ -20,7 +21,8 @@ are rejected if someone tries to invoke them.
 | 🎚️ | Turns **each skill on and off independently** |
 | 🧹 | Disabled skills **disappear from the model's environment** |
 | 🚫 | Asking for a disabled skill **is rejected** cleanly |
-| 🧠 | Your choice **is saved to disk** and survives restarts |
+| 🧠 | Each session **remembers its own choices** across restarts |
+| 🆕 | New sessions start clean: only the built-in skill is on |
 | 💾 | Uses the same database: **no lost conversations or settings** |
 | 🛡️ | Guard that restores the toggle if the official update overwrites it (Linux · macOS · Windows) |
 | 🖥️ | Works on **Linux, macOS and Windows** (CLI) |
@@ -53,8 +55,8 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 
 ### 📦 Manual install
 
-1. Go to [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases).
-2. Download your binary:
+1. Go to [Releases](https://github.com/BenReynor/opencode-skill-toggle/releases)
+   and download your binary:
 
    | System | File |
    |---------|---------|
@@ -66,20 +68,15 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
    | 🍎 macOS Apple Silicon | `opencode-darwin-arm64` |
    | 🪟 Windows x64 | `opencode-windows-x64` |
 
-   You can also put a local binary next to `install.sh` (`opencode-<platform>` or
-   `dist/opencode-<platform>`).
-3. Make it executable, back up your current binary if any, and replace
-   `~/.opencode/bin/opencode` (or `%USERPROFILE%\.opencode\bin\opencode.exe`).
-4. Run `./install.sh` or `install.ps1` from the repo **or** copy its scripts; the
-   installers copy `toggle-guard.sh`/`toggle-guard.ps1`, `toggle-cleanup.sh`/`toggle-cleanup.ps1`
-   to `~/.opencode/`, create the marker, set up the scheduler and **do not require keeping
-   the cloned repository after installation**. If you use the `curl | bash` / `irm | iex`
-   one-liners, **nothing is placed on your Desktop**.
-
-3. Replace the opencode binary:
-   - **Linux/macOS**: `~/.opencode/bin/opencode` (remember `chmod +x`).
+2. Put it where opencode lives (keep a copy of the previous one if you want to
+   be able to roll back):
+   - **Linux/macOS**: `~/.opencode/bin/opencode` (`chmod +x` it).
    - **Windows**: `%USERPROFILE%\.opencode\bin\opencode.exe`.
-4. Optional: keep a copy of the previous one before replacing.
+3. Verify it against `SHA256SUMS` from the same release.
+4. Optional but recommended: run `./install.sh` (Linux/macOS) or `install.ps1`
+   (Windows) **from the repository** to install the 🛡️ guard and the cleanup
+   script. With `TOGGLE_USE_LOCAL=1 ./install.sh` it uses a binary you built
+   locally (`./build.sh`) instead of downloading one.
 
 > **🔓 Unsigned binaries**: on macOS, Gatekeeper may block the first run
 > (_right-click > Open_ or `xattr -dr com.apple.quarantine opencode`). On Windows,
@@ -107,7 +104,14 @@ Select the skill you want and enable or disable it:
 - ✅ **Enabled** — the skill is active and available.
 - ⭕ **Disabled** — the skill is off; it is neither loaded nor invocable.
 
-Your choice is saved to disk instantly and persists across restarts. 🔁
+The change applies to the **current session** and is saved to disk instantly;
+that session keeps it across restarts. 🔁 A **new session starts with only the
+built-in skill enabled**, so disabled skills do not clutter every conversation.
+Sessions created before this version keep the global configuration they had.
+
+The built-in `customize-opencode` skill is always available and cannot be
+disabled. The state lives in `~/.local/share/opencode/skills-toggle.json`
+(`%LOCALAPPDATA%\opencode\skills-toggle.json` on Windows).
 
 ### 🔌 Query the state via the API (advanced)
 
@@ -116,11 +120,16 @@ scripts and CI:
 
 | Endpoint | Method | Effect |
 |----------|--------|--------|
+| `/skill` | GET | Skills enabled **for that session** |
 | `/skill/status` | GET | State of each skill (enabled/disabled) |
-| `/skill/:name/enable` | POST | Enables the skill instantly |
-| `/skill/:name/disable` | POST | Disables it instantly and persists |
+| `/skill/:name/enable` | POST | Enables the skill in that session |
+| `/skill/:name/disable` | POST | Disables it in that session |
 
-The `/skill-toggle` dialog does exactly the same thing.
+All four accept `?session=<session-id>`. **Without `session`** they operate on
+the template used for **new** sessions (by default only the built-in skill), so
+scripts can preconfigure what new conversations start with.
+
+The `/skill-toggle` dialog does exactly the same thing for the open session.
 
 ---
 
@@ -142,6 +151,13 @@ The `/skill-toggle` dialog does exactly the same thing.
   Yes, each skill is managed independently. You can leave them all off or only
   the ones you do not use.
 
+- **Do I have to enable skills in every new session?**
+  New sessions start with only the built-in skill, so yes: enable the ones you
+  need for that conversation. If you want a different starting point, call
+  `/skill/<name>/enable` **without** `?session=` (advanced; that changes the
+  template for future sessions, not the current one). Sessions created before
+  the upgrade keep the old global configuration.
+
 - **Does the guard also work on macOS / Windows?**
   Yes. macOS uses a LaunchAgent (launchd, every 15 min) and Windows a Scheduled
   Task (every 15 min and at logon); `install.sh` / `install.ps1` set them up
@@ -153,7 +169,9 @@ The `/skill-toggle` dialog does exactly the same thing.
 
 This repository self-rebuilds: whenever opencode releases a new version, it is
 rebuilt with the toggle and published to a versioned release. That way you always
-get the latest version **with** the toggle.
+get the latest version **with** the toggle. It also rebuilds when the **patches**
+change: every release carries a `PATCH_SHA256` asset, so a stale binary is never
+served just because the upstream version number did not move.
 
 > Each build is published to a **unique tag** (`toggle-<version>` or
 > `toggle-<version>-r<build>`): the content of every release never changes, so the
@@ -261,10 +279,39 @@ toggle build from the newest versioned release.
 
 ---
 
+### 🗑️ Uninstall
+
+1. Remove the scheduler entry, if you installed the guard:
+
+   ```bash
+   # Linux
+   systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer
+
+   # macOS
+   launchctl unload -w ~/Library/LaunchAgents/com.opencode.skill-toggle-guard.plist
+
+   # Windows (PowerShell)
+   Unregister-ScheduledTask -TaskName 'opencode-skill-toggle-guard' -Confirm:$false
+   ```
+
+2. Delete the installed helper scripts and (optionally) the state:
+
+   ```bash
+   rm -f ~/.opencode/toggle-guard.sh ~/.opencode/toggle-cleanup.sh
+   rm -f ~/.opencode/bin/opencode.sha256
+   rm -f ~/.local/share/opencode/skills-toggle.json
+   ```
+
+3. Replace `~/.opencode/bin/opencode` with the official binary using your usual
+   method (official installer or `opencode upgrade`). The `.bak` next to it, if
+   present, is the copy saved by the installer.
+
 ## 🔒 Security
 
 - **🔐 SHA256 verified**: every release publishes `SHA256SUMS`; the installer
-  checks the binary before installing it and aborts if it doesn't match.
+  checks the binary before installing it and aborts if it doesn't match. The
+  guard and cleanup scripts are checked against `SHA256SUMS.scripts` and
+  discarded on mismatch (older releases without that file are reported).
 - **🏭 Built in GitHub Actions**: binaries are produced in CI from the upstream
   code + patches, no hand-built binaries are uploaded.
 - **🔗 Actions pinned to SHA**: fixed, specific versions of `actions/checkout`

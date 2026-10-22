@@ -38,8 +38,12 @@ GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
 BIN="${TOGGLE_GUARD_BIN:-$HOME/.opencode/bin/opencode}"
 MARKER="$BIN.sha256"
 LOG="${TOGGLE_GUARD_LOG:-$HOME/.opencode/toggle-guard.log}"
-LOCK="/tmp/opencode-toggle-guard.$(id -u).lock"
 CACHE_DIR="$HOME/.opencode"
+# Keep the lock out of the world-writable temp dir. XDG_RUNTIME_DIR is private
+# to the user; ~/.opencode is created 0700 below.
+LOCK_DIR="${XDG_RUNTIME_DIR:-$CACHE_DIR}"
+LOCK="$LOCK_DIR/opencode-toggle-guard.lock"
+umask 077
 CACHE_TAG="$CACHE_DIR/.toggle-guard-tag"
 CACHE_SUMS="$CACHE_DIR/.toggle-guard-sums"
 CACHE_MIN="${TOGGLE_GUARD_CACHE_MIN:-60}"
@@ -87,7 +91,8 @@ detect_platform() {
 # only hashes the local binary and compares it: one API call per hour.
 cache_is_fresh() {
   [[ -f "$CACHE_TAG" && -f "$CACHE_SUMS" ]] || return 1
-  find "$CACHE_TAG" -mmin "-$CACHE_MIN" >/dev/null 2>&1
+  # `find` exits 0 even with no match, so it cannot be used as a test by itself.
+  find "$CACHE_TAG" -mmin "-$CACHE_MIN" -print -quit 2>/dev/null | grep -q .
 }
 
 load_cache() {
@@ -123,6 +128,8 @@ refresh_cache() {
 }
 
 # Do not run two reinstalls at the same time.
+mkdir -p "$LOCK_DIR" 2>/dev/null || true
+chmod 700 "$CACHE_DIR" 2>/dev/null || true
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK"
   flock -n 9 || { log "a reinstall is already in progress; skipping"; exit 0; }
@@ -132,8 +139,10 @@ fi
 
 PLATFORM="$(detect_platform)"
 if [[ "$PLATFORM" == unsupported:* ]]; then
-  log "unsupported platform: $PLATFORM"
-  exit 1
+  # Nothing to install on this platform: not an error, so schedulers do not
+  # report a failure every 15 minutes.
+  log "unsupported platform: $PLATFORM; skipping"
+  exit 0
 fi
 
 # --- Which release are we on, and is a newer one published? --------------------
@@ -173,7 +182,9 @@ else
   log "a newer skill-toggle build is published ($TAG): updating"
 fi
 
-TMP="$(mktemp)"
+# The temporary file must live on the same filesystem as BIN so the final
+# rename is atomic (mktemp defaults to /tmp, a different mount on some systems).
+TMP="$(mktemp -p "$(dirname "$BIN")" ".opencode-toggle.XXXXXX")"
 cleanup() { rm -f "$TMP"; }
 trap cleanup EXIT
 
@@ -221,5 +232,6 @@ log "skill-toggle installed OK ($PLATFORM, $VER, sha256 $ACTUAL)"
 # Residue cleanup from previous versions (backups .bak / temporary files).
 CLEANUP="$HOME/.opencode/toggle-cleanup.sh"
 if [[ -f "$CLEANUP" ]]; then
-  bash "$CLEANUP" >/dev/null 2>&1 || true
+  # Keep the .bak: it is the only copy of the previous working binary.
+  TOGGLE_CLEANUP_KEEP_BACKUP=1 bash "$CLEANUP" >/dev/null 2>&1 || true
 fi

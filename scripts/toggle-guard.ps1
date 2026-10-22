@@ -116,7 +116,8 @@ if ($Reason -eq "restore") {
   Guard-Log "a newer skill-toggle build is published ($($Release.Tag)): updating"
 }
 
-$Tmp = Join-Path $env:TEMP "opencode-toggle.download"
+# Same directory/volume as the binary so Move-Item is atomic.
+$Tmp = Join-Path (Split-Path -Parent $Bin) "opencode-toggle.$PID.download"
 $Backup = "$Bin.bak"
 
 try {
@@ -171,7 +172,12 @@ try {
   # Residue cleanup from previous versions (backups .bak / temporary files).
   $Cleanup = Join-Path $HOME ".opencode\toggle-cleanup.ps1"
   if (Test-Path -LiteralPath $Cleanup) {
-    & $Cleanup | Out-Null
+    $PrevKeep = $env:TOGGLE_CLEANUP_KEEP_BACKUP
+    $env:TOGGLE_CLEANUP_KEEP_BACKUP = "1"
+    try { & $Cleanup | Out-Null } finally {
+      if ($null -eq $PrevKeep) { Remove-Item Env:\TOGGLE_CLEANUP_KEEP_BACKUP -ErrorAction SilentlyContinue }
+      else { $env:TOGGLE_CLEANUP_KEEP_BACKUP = $PrevKeep }
+    }
   }
 } finally {
   Remove-Item -LiteralPath $Tmp -Force -ErrorAction SilentlyContinue

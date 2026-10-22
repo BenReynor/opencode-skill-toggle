@@ -8,19 +8,76 @@
 #   GH_REPO=youruser/opencode-skill-toggle ./install.sh
 #   TOGGLE_GUARD=0 ./install.sh         # don't install the anti-overwrite guard
 #
-# If a local binary (opencode-<platform>) is found next to install.sh it is
-# used first; otherwise it downloads from the newest versioned release (one
-# build per tag, assets are never overwritten — avoids mixing old/new binaries
-# in the CDN cache).
+# By default it downloads the binary from the newest versioned release and
+# verifies its SHA256 (one build per tag, assets are never overwritten — avoids
+# mixing old/new binaries in the CDN cache). A binary next to the script is only
+# used with TOGGLE_USE_LOCAL=1 (e.g. right after running ./build.sh).
 set -euo pipefail
 
 GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
 ORIG="$HOME/.opencode/bin/opencode"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd 2>/dev/null || echo "$PWD")"
+# When the script is piped (curl | bash), BASH_SOURCE[0] is not a real file:
+# resolving it would point at the current directory, which must not be treated
+# as the repository. Only use it when it names an actual file.
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+  SCRIPT_DIR=""
+fi
 # Downloads go to the temp dir: the script dir may be read-only (installing
-# from /usr/local/bin, a USB stick or a read-only mount) or the current
-# directory when run via "curl | bash".
+# from /usr/local/bin, a USB stick or a read-only mount) or nonexistent when
+# run via "curl | bash".
 DL_DIR="${TMPDIR:-/tmp}"
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+# Scripts (guard/cleanup) are published next to the binary with their own
+# checksum file. Verification is best-effort for older releases that predate
+# SHA256SUMS.scripts, but a mismatch is always fatal. SCRIPT_SUMS is set after
+# resolving the release (it is scoped per tag so a cached file from another
+# release can never be reused).
+SCRIPT_SUMS=""
+verify_script() {
+  local name="$1" file="$2" expected actual
+  if [[ ! -f "$SCRIPT_SUMS" ]]; then
+    curl -fsSL --proto =https --tlsv1.2 \
+      "$RELEASE_BASE/SHA256SUMS.scripts" -o "$SCRIPT_SUMS" 2>/dev/null || true
+  fi
+  if [[ ! -f "$SCRIPT_SUMS" ]]; then
+    echo ">> warning: no SHA256SUMS.scripts in this release; $name not verified" >&2
+    return 0
+  fi
+  expected="$(awk -v a="$name" '$2==a || $2=="./"a {print $1; exit}' "$SCRIPT_SUMS")"
+  if [[ -z "$expected" ]]; then
+    echo ">> warning: no checksum for $name; not verified" >&2
+    return 0
+  fi
+  actual="$(sha256_of "$file")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "ERROR: SHA256 verification failed for $name" >&2
+    return 1
+  fi
+  return 0
+}
+
+download_script() {
+  local name="$1" dest="$2" tmp
+  tmp="$(mktemp)"
+  if curl -fsSL --proto =https --tlsv1.2 "$RELEASE_BASE/$name" -o "$tmp" 2>/dev/null \
+     && verify_script "$name" "$tmp"; then
+    mv -f "$tmp" "$dest"
+    chmod +x "$dest" 2>/dev/null || true
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
 
 # --- Detect platform --------------------------------------------------------
 detect_platform() {
@@ -61,16 +118,24 @@ resolve_release_base() {
   fi
 }
 RELEASE_BASE="$(resolve_release_base)"
+SCRIPT_SUMS="$DL_DIR/.opencode-toggle-scripts-sums.${RELEASE_BASE##*/}"
 echo ">> Release: ${RELEASE_BASE#https://github.com/$GH_REPO/releases/download/}"
 
 # --- Obtain the binary ------------------------------------------------------
+# A local binary is only used on explicit request (TOGGLE_USE_LOCAL=1). The
+# default is a verified download: with `curl | bash` the "local" file would come
+# from whatever directory the command happened to run in.
 BIN_SRC=""
-for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PLATFORM"; do
-  if [[ -f "$candidate" ]]; then
-    BIN_SRC="$candidate"
-    break
-  fi
-done
+if [[ "${TOGGLE_USE_LOCAL:-0}" == "1" && -n "$SCRIPT_DIR" ]]; then
+  for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PLATFORM"; do
+    if [[ -f "$candidate" ]]; then
+      BIN_SRC="$candidate"
+      echo ">> Using local binary (TOGGLE_USE_LOCAL=1): $BIN_SRC"
+      echo ">> warning: a local binary is not verified against the release" >&2
+      break
+    fi
+  done
+fi
 if [[ -z "$BIN_SRC" ]]; then
   URL="$RELEASE_BASE/opencode-$PLATFORM"
   echo ">> Downloading: $URL"
@@ -143,28 +208,19 @@ echo
 #   - keep a single .bak of the previous one: TOGGLE_CLEANUP_KEEP_BACKUP=1
 #   - dry run (list only):                   TOGGLE_CLEANUP_DRY_RUN=1
 CLEANUP="$HOME/.opencode/toggle-cleanup.sh"
-if [[ -f "$SCRIPT_DIR/scripts/toggle-cleanup.sh" ]]; then
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/scripts/toggle-cleanup.sh" ]]; then
   cp "$SCRIPT_DIR/scripts/toggle-cleanup.sh" "$CLEANUP"
-else
-  # Download to a temporary file and move it: a failed download must never
-  # leave a truncated (unusable) script behind.
-  CLEANUP_TMP="$(mktemp)"
-  if curl -fsSL --proto =https --tlsv1.2 \
-    "$RELEASE_BASE/toggle-cleanup.sh" \
-    -o "$CLEANUP_TMP" 2>/dev/null; then
-    mv -f "$CLEANUP_TMP" "$CLEANUP"
+elif ! download_script "toggle-cleanup.sh" "$CLEANUP"; then
+  if [[ ! -f "$CLEANUP" ]]; then
+    echo ">> Warning: could not download toggle-cleanup.sh" >&2
   else
-    rm -f "$CLEANUP_TMP"
-    if [[ ! -f "$CLEANUP" ]]; then
-      echo ">> Warning: could not download toggle-cleanup.sh" >&2
-    else
-      echo ">> Keeping the existing toggle-cleanup.sh (download failed)"
-    fi
+    echo ">> Keeping the existing toggle-cleanup.sh (download failed)"
   fi
 fi
 if [[ -f "$CLEANUP" ]]; then
   chmod +x "$CLEANUP" 2>/dev/null || true
-  if bash "$CLEANUP"; then
+  # Keep the .bak: it is the only copy of the previous working binary.
+  if TOGGLE_CLEANUP_KEEP_BACKUP=1 bash "$CLEANUP"; then
     echo ">> Residues of previous versions removed"
   else
     echo ">> Warning: residue cleanup did not finish properly; retry with: bash $CLEANUP" >&2
@@ -180,20 +236,11 @@ echo
 #   - Windows: Scheduled Task (handled by install.ps1)
 if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
   GUARD="$HOME/.opencode/toggle-guard.sh"
-  if [[ -f "$SCRIPT_DIR/scripts/toggle-guard.sh" ]]; then
+  if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/scripts/toggle-guard.sh" ]]; then
     cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
-  else
-    # Same as above: download to a temporary file, then move it into place.
-    GUARD_TMP="$(mktemp)"
-    if curl -fsSL --proto =https --tlsv1.2 \
-      "$RELEASE_BASE/toggle-guard.sh" \
-      -o "$GUARD_TMP" 2>/dev/null; then
-      mv -f "$GUARD_TMP" "$GUARD"
-    else
-      rm -f "$GUARD_TMP"
-      echo ">> Warning: could not download toggle-guard.sh; anti-overwrite guard NOT installed" >&2
-      GUARD=""
-    fi
+  elif ! download_script "toggle-guard.sh" "$GUARD"; then
+    echo ">> Warning: could not download toggle-guard.sh; anti-overwrite guard NOT installed" >&2
+    GUARD=""
   fi
 
   if [[ -n "$GUARD" ]]; then
