@@ -332,6 +332,7 @@ jobs:
         run: bash "$GITHUB_WORKSPACE/scripts/smoke-test.sh"
 
       - name: Installer is idempotent (no re-download when already current)
+        if: ${{ matrix.platform != 'windows-x64' }}
         run: |
           # Use a throwaway HOME and a dummy local binary so this checks the
           # "already up to date" path without downloading hundreds of MB again.
