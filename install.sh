@@ -7,12 +7,22 @@
 #                                       # downloads it from the GitHub release
 #   GH_REPO=youruser/opencode-skill-toggle ./install.sh
 #   TOGGLE_GUARD=0 ./install.sh         # don't install the anti-overwrite guard
+#   ./install.sh --force                # reinstall even if already up to date
 #
 # By default it downloads the binary from the newest versioned release and
 # verifies its SHA256 (one build per tag, assets are never overwritten — avoids
 # mixing old/new binaries in the CDN cache). A binary next to the script is only
 # used with TOGGLE_USE_LOCAL=1 (e.g. right after running ./build.sh).
 set -euo pipefail
+
+FORCE="${TOGGLE_FORCE:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=1 ;;
+    -h | --help) echo "Usage: install.sh [--force]"; exit 0 ;;
+    *) echo "Unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
 
 GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
 ORIG="$HOME/.opencode/bin/opencode"
@@ -43,17 +53,24 @@ sha256_of() {
 # resolving the release (it is scoped per tag so a cached file from another
 # release can never be reused).
 SCRIPT_SUMS=""
+ensure_script_sums() {
+  [[ -f "$SCRIPT_SUMS" ]] && return 0
+  curl -fsSL --proto =https --tlsv1.2 \
+    "$RELEASE_BASE/SHA256SUMS.scripts" -o "$SCRIPT_SUMS" 2>/dev/null || true
+  [[ -f "$SCRIPT_SUMS" ]]
+}
+script_expected() {
+  local name="$1"
+  ensure_script_sums || return 0
+  awk -v a="$name" '$2==a || $2=="./"a {print $1; exit}' "$SCRIPT_SUMS"
+}
 verify_script() {
   local name="$1" file="$2" expected actual
-  if [[ ! -f "$SCRIPT_SUMS" ]]; then
-    curl -fsSL --proto =https --tlsv1.2 \
-      "$RELEASE_BASE/SHA256SUMS.scripts" -o "$SCRIPT_SUMS" 2>/dev/null || true
-  fi
-  if [[ ! -f "$SCRIPT_SUMS" ]]; then
+  if ! ensure_script_sums; then
     echo ">> warning: no SHA256SUMS.scripts in this release; $name not verified" >&2
     return 0
   fi
-  expected="$(awk -v a="$name" '$2==a || $2=="./"a {print $1; exit}' "$SCRIPT_SUMS")"
+  expected="$(script_expected "$name")"
   if [[ -z "$expected" ]]; then
     echo ">> warning: no checksum for $name; not verified" >&2
     return 0
@@ -67,7 +84,13 @@ verify_script() {
 }
 
 download_script() {
-  local name="$1" dest="$2" tmp
+  local name="$1" dest="$2" tmp expected
+  # Idempotent: if the installed copy already matches the published checksum,
+  # leave it alone (no download, no rewrite).
+  expected="$(script_expected "$name" || true)"
+  if [[ -n "$expected" && -f "$dest" && "$(sha256_of "$dest")" == "$expected" ]]; then
+    return 0
+  fi
   tmp="$(mktemp)"
   if curl -fsSL --proto =https --tlsv1.2 "$RELEASE_BASE/$name" -o "$tmp" 2>/dev/null \
      && verify_script "$name" "$tmp"; then
@@ -126,10 +149,21 @@ echo ">> Release: ${RELEASE_BASE#https://github.com/$GH_REPO/releases/download/}
 # default is a verified download: with `curl | bash` the "local" file would come
 # from whatever directory the command happened to run in.
 BIN_SRC=""
+BIN_DOWNLOADED=0
+TARGET_HASH=""
+SHA_URL="$RELEASE_BASE/SHA256SUMS"
+SHA_FILE="$DL_DIR/.opencode-toggle-sha256.download"
+EXPECTED=""
+if curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_FILE" 2>/dev/null; then
+  EXPECTED="$(awk -v a="opencode-$PLATFORM" '$2==a {print $1; exit}' "$SHA_FILE")"
+fi
+rm -f "$SHA_FILE"
+
 if [[ "${TOGGLE_USE_LOCAL:-0}" == "1" && -n "$SCRIPT_DIR" ]]; then
   for candidate in "$SCRIPT_DIR/opencode-$PLATFORM" "$SCRIPT_DIR/dist/opencode-$PLATFORM"; do
     if [[ -f "$candidate" ]]; then
       BIN_SRC="$candidate"
+      TARGET_HASH="$(sha256_of "$candidate")"
       echo ">> Using local binary (TOGGLE_USE_LOCAL=1): $BIN_SRC"
       echo ">> warning: a local binary is not verified against the release" >&2
       break
@@ -137,70 +171,75 @@ if [[ "${TOGGLE_USE_LOCAL:-0}" == "1" && -n "$SCRIPT_DIR" ]]; then
   done
 fi
 if [[ -z "$BIN_SRC" ]]; then
-  URL="$RELEASE_BASE/opencode-$PLATFORM"
-  echo ">> Downloading: $URL"
-  BIN_SRC="$DL_DIR/.opencode-toggle-$PLATFORM.download"
-  curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$BIN_SRC"
+  TARGET_HASH="$EXPECTED"
+fi
 
-  # --- SHA256 verification --------------------------------------------------
-  SHA_URL="$RELEASE_BASE/SHA256SUMS"
-  SHA_FILE="$DL_DIR/.opencode-toggle-sha256.download"
-  echo ">> Verifying SHA256 against $SHA_URL"
-  if curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_FILE"; then
-    EXPECTED="$(awk -v a="opencode-$PLATFORM" '$2==a {print $1; exit}' "$SHA_FILE")"
+CUR_HASH=""
+[[ -f "$ORIG" ]] && CUR_HASH="$(sha256_of "$ORIG")"
+MARKER_HASH="$(cat "$ORIG.sha256" 2>/dev/null || true)"
+UP_TO_DATE=0
+if [[ "$FORCE" != "1" && -n "$TARGET_HASH" && -n "$CUR_HASH" \
+      && "$CUR_HASH" == "$TARGET_HASH" && "$MARKER_HASH" == "$TARGET_HASH" ]]; then
+  UP_TO_DATE=1
+fi
+
+if [[ "$UP_TO_DATE" == "1" ]]; then
+  echo ">> Already up to date: $ORIG (SHA256 $TARGET_HASH)"
+else
+  if [[ -z "$BIN_SRC" ]]; then
+    URL="$RELEASE_BASE/opencode-$PLATFORM"
+    echo ">> Downloading: $URL"
+    BIN_SRC="$DL_DIR/.opencode-toggle-$PLATFORM.download"
+    BIN_DOWNLOADED=1
+    curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$BIN_SRC"
+
     if [[ -z "$EXPECTED" ]]; then
       echo ">> warning: no checksum for opencode-$PLATFORM; continuing without verification" >&2
     else
-      if command -v sha256sum >/dev/null 2>&1; then
-        ACTUAL="$(sha256sum "$BIN_SRC" | awk '{print $1}')"
-      else
-        ACTUAL="$(shasum -a 256 "$BIN_SRC" | awk '{print $1}')"
-      fi
+      echo ">> Verifying SHA256 against $SHA_URL"
+      ACTUAL="$(sha256_of "$BIN_SRC")"
       if [[ "$ACTUAL" != "$EXPECTED" ]]; then
         echo "ERROR: SHA256 verification failed for opencode-$PLATFORM" >&2
         echo "  expected: $EXPECTED" >&2
         echo "  got: $ACTUAL" >&2
-        rm -f "$BIN_SRC" "$SHA_FILE"
+        rm -f "$BIN_SRC"
         echo "  The binary was discarded because of possible tampering." >&2
         exit 1
       fi
       echo ">> SHA256 verified correctly"
     fi
-  else
-    echo ">> warning: could not download SHA256SUMS; continuing without verification" >&2
   fi
-  rm -f "$SHA_FILE"
 fi
 
-# --- Backup of the current binary -------------------------------------------
-mkdir -p "$HOME/.opencode/bin"
-if [[ -f "$ORIG" && ! -f "$ORIG.bak" ]]; then
-  cp "$ORIG" "$ORIG.bak"
-  echo ">> Backup saved: $ORIG.bak"
-elif [[ -f "$ORIG" ]]; then
-  echo ">> Backup exists: $ORIG.bak (not overwritten)"
-fi
+# --- Backup + install -------------------------------------------------------
+if [[ "$UP_TO_DATE" != "1" ]]; then
+  mkdir -p "$HOME/.opencode/bin"
+  if [[ -f "$ORIG" && ! -f "$ORIG.bak" ]]; then
+    cp "$ORIG" "$ORIG.bak"
+    echo ">> Backup saved: $ORIG.bak"
+  elif [[ -f "$ORIG" ]]; then
+    echo ">> Backup exists: $ORIG.bak (not overwritten)"
+  fi
 
-# --- Install ----------------------------------------------------------------
-# Atomic replacement (mv): does not fail with "Text file busy" even when
-# opencode is running. The running process keeps its old inode, and new
-# sessions use the new binary.
-TMP="$ORIG.tmp.$$"
-cp "$BIN_SRC" "$TMP"
-chmod +x "$TMP"
-mv -f "$TMP" "$ORIG"
-rm -f "$BIN_SRC"
+  # Atomic replacement (mv): does not fail with "Text file busy" even when
+  # opencode is running. The running process keeps its old inode, and new
+  # sessions use the new binary.
+  TMP="$ORIG.tmp.$$"
+  cp "$BIN_SRC" "$TMP"
+  chmod +x "$TMP"
+  mv -f "$TMP" "$ORIG"
+  # Never delete a local build supplied through TOGGLE_USE_LOCAL.
+  if [[ "$BIN_DOWNLOADED" == "1" ]]; then
+    rm -f "$BIN_SRC"
+  fi
 
-# Marker for the guard: hash of the just-installed toggle binary.
-if command -v sha256sum >/dev/null 2>&1; then
-  HASH_ACTUAL="$(sha256sum "$ORIG" | awk '{print $1}')"
-else
-  HASH_ACTUAL="$(shasum -a 256 "$ORIG" | awk '{print $1}')"
+  # Marker for the guard: hash of the just-installed toggle binary.
+  HASH_ACTUAL="$(sha256_of "$ORIG")"
+  echo "$HASH_ACTUAL" > "$ORIG.sha256"
+  # Drop the guard's release cache: it may point at the previous tag, and the
+  # guard would otherwise see this binary as "not published" and downgrade it.
+  rm -f "$HOME/.opencode/.toggle-guard-tag" "$HOME/.opencode/.toggle-guard-sums"
 fi
-echo "$HASH_ACTUAL" > "$ORIG.sha256"
-# Drop the guard's release cache: it may point at the previous tag, and the
-# guard would otherwise see this binary as "not published" and downgrade it.
-rm -f "$HOME/.opencode/.toggle-guard-tag" "$HOME/.opencode/.toggle-guard-sums"
 
 echo ">> opencode with skill-toggle installed: $ORIG"
 echo
@@ -212,7 +251,10 @@ echo
 #   - dry run (list only):                   TOGGLE_CLEANUP_DRY_RUN=1
 CLEANUP="$HOME/.opencode/toggle-cleanup.sh"
 if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/scripts/toggle-cleanup.sh" ]]; then
-  cp "$SCRIPT_DIR/scripts/toggle-cleanup.sh" "$CLEANUP"
+  if [[ ! -f "$CLEANUP" ]] || \
+     [[ "$(sha256_of "$SCRIPT_DIR/scripts/toggle-cleanup.sh")" != "$(sha256_of "$CLEANUP")" ]]; then
+    cp "$SCRIPT_DIR/scripts/toggle-cleanup.sh" "$CLEANUP"
+  fi
 elif ! download_script "toggle-cleanup.sh" "$CLEANUP"; then
   if [[ ! -f "$CLEANUP" ]]; then
     echo ">> Warning: could not download toggle-cleanup.sh" >&2
@@ -240,7 +282,10 @@ echo
 if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
   GUARD="$HOME/.opencode/toggle-guard.sh"
   if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/scripts/toggle-guard.sh" ]]; then
-    cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
+    if [[ ! -f "$GUARD" ]] || \
+       [[ "$(sha256_of "$SCRIPT_DIR/scripts/toggle-guard.sh")" != "$(sha256_of "$GUARD")" ]]; then
+      cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
+    fi
   elif ! download_script "toggle-guard.sh" "$GUARD"; then
     echo ">> Warning: could not download toggle-guard.sh; anti-overwrite guard NOT installed" >&2
     GUARD=""

@@ -48,6 +48,16 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 > **atomic**: you can reinstall even while opencode is running (the running process
 > keeps its old binary; new sessions use the new one).
 >
+> Re-running the installer is safe and cheap: it first fetches only the small
+> `SHA256SUMS`, and if the installed binary **and** its marker already match the
+> release it prints `Already up to date` and skips the download entirely. The
+> guard/cleanup scripts are rewritten only when their checksum differs, and the
+> single `.bak` is never duplicated. Use `--force` (`-Force` on Windows) to
+> reinstall anyway.
+>
+> Downloads go to the system temp directory (`$TMPDIR` or `/tmp`); on Windows the
+> binary is staged in `~/.opencode/bin` so the replacement can be atomic.
+>
 > On **Linux, macOS and Windows** the installer leaves the 🛡️ **anti-overwrite
 > guard** enabled by default (systemd / launchd / Task Scheduler): if the official
 > autoupdate replaces your binary, the toggle is restored automatically in the

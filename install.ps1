@@ -7,13 +7,15 @@
 
   Optional:
     $env:GH_REPO = "youruser/opencode-skill-toggle"  before running.
+    -Force                                          reinstall even if up to date.
 
   Downloads the current-platform binary from the newest versioned release,
   backs up the previous installation and replaces %USERPROFILE%\.opencode\bin\opencode.exe.
 #>
 [CmdletBinding()]
 param(
-  [string]$Repo = $env:GH_REPO
+  [string]$Repo = $env:GH_REPO,
+  [switch]$Force
 )
 
 if (-not $Repo) {
@@ -33,7 +35,6 @@ function Install-ScriptFromRelease([string]$Name) {
   $Tmp = Join-Path $env:TEMP "$Name.$PID.download"
   $Sums = Join-Path $env:TEMP "SHA256SUMS.scripts.$PID"
   try {
-    Invoke-WebRequest -Uri "$ReleaseBase/$Name" -OutFile $Tmp -UseBasicParsing -ErrorAction Stop
     $Expected = $null
     try {
       Invoke-WebRequest -Uri "$ReleaseBase/SHA256SUMS.scripts" -OutFile $Sums -UseBasicParsing -ErrorAction Stop
@@ -44,6 +45,12 @@ function Install-ScriptFromRelease([string]$Name) {
     } catch {
       Write-Warning "No SHA256SUMS.scripts for this release; $Name will not be verified"
     }
+    # Idempotent: leave an already-current copy untouched.
+    if ($Expected -and (Test-Path -LiteralPath $Dest)) {
+      $Current = (Get-FileHash -LiteralPath $Dest -Algorithm SHA256).Hash.ToLower()
+      if ($Current -eq $Expected) { return $Dest }
+    }
+    Invoke-WebRequest -Uri "$ReleaseBase/$Name" -OutFile $Tmp -UseBasicParsing -ErrorAction Stop
     if ($Expected) {
       $Actual = (Get-FileHash -LiteralPath $Tmp -Algorithm SHA256).Hash.ToLower()
       if ($Actual -ne $Expected) { throw "SHA256 verification failed for $Name" }
@@ -94,22 +101,9 @@ function Resolve-ReleaseBase {
 $ReleaseBase = Resolve-ReleaseBase
 Write-Step "Release: $($ReleaseBase -replace '^.*/download/','')"
 
-$Url = "$ReleaseBase/opencode-$Platform"
-
-New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-
-Write-Step "Downloading: $Url"
-$Tmp = Join-Path $BinDir "opencode.download"
-if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
-  & curl.exe -fsSL $Url -o $Tmp
-  if ($LASTEXITCODE -ne 0) { throw "curl could not download $Url (exit $LASTEXITCODE)" }
-} else {
-  Invoke-WebRequest -Uri $Url -OutFile $Tmp -UseBasicParsing
-}
-
-# --- SHA256 verification ------------------------------------------------------
 $ShaUrl = "$ReleaseBase/SHA256SUMS"
 $ShaTmp = Join-Path $BinDir "opencode-sha256.download"
+$Expected = $null
 Write-Step "Verifying SHA256 against $ShaUrl"
 try {
   if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
@@ -120,58 +114,82 @@ try {
   }
   # The SHA256SUMS format is "<hash>  opencode-<platform>"
   $ExpectedLine = Get-Content $ShaTmp | Where-Object { $_ -match "(?i)opencode-$Platform\s*$" } | Select-Object -First 1
-  if (-not $ExpectedLine) {
-    Write-Warning "No checksum for opencode-$Platform; continuing without verification."
+  if ($ExpectedLine) {
+    $Expected = ($ExpectedLine -split '\s+')[0].ToLower()
   } else {
-    $Expected = ($ExpectedLine -split '\s+')[0]
-    $Actual = (Get-FileHash -Path $Tmp -Algorithm SHA256).Hash.ToLower()
-    if ($Actual -ne $Expected.ToLower()) {
-      Remove-Item -Force $Tmp, $ShaTmp -ErrorAction SilentlyContinue
-      throw "SHA256 verification failed for opencode-$Platform. Expected: $Expected. Got: $Actual. The binary was discarded because of possible tampering."
-    }
-    Write-Step "SHA256 verified correctly"
+    Write-Warning "No checksum for opencode-$Platform; continuing without verification."
   }
+} catch {
+  Write-Warning "Could not download SHA256SUMS; continuing without verification"
 } finally {
   if (Test-Path $ShaTmp) { Remove-Item -Force $ShaTmp }
 }
 
-# --- Backup of the current binary ---------------------------------------------
-if (Test-Path $Final) {
-  $Backup = "$Final.bak"
-  if (-not (Test-Path $Backup)) {
-    Copy-Item $Final $Backup -Force
-    Write-Step "Backup saved: $Backup"
+$Cur = $null
+if (Test-Path $Final) { $Cur = (Get-FileHash -LiteralPath $Final -Algorithm SHA256).Hash.ToLower() }
+$Marker = $null
+if (Test-Path "$Final.sha256") { $Marker = (Get-Content -LiteralPath "$Final.sha256" -Raw).Trim().ToLower() }
+$UpToDate = (-not $Force) -and $Expected -and $Cur -eq $Expected -and $Marker -eq $Expected
+
+if ($UpToDate) {
+  Write-Step "Already up to date: $Final (SHA256 $Expected)"
+} else {
+  $Url = "$ReleaseBase/opencode-$Platform"
+  Write-Step "Downloading: $Url"
+  $Tmp = Join-Path $BinDir "opencode.download"
+  if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+    & curl.exe -fsSL $Url -o $Tmp
+    if ($LASTEXITCODE -ne 0) { throw "curl could not download $Url (exit $LASTEXITCODE)" }
   } else {
-    Write-Step "Backup exists: $Backup (not overwritten)"
+    Invoke-WebRequest -Uri $Url -OutFile $Tmp -UseBasicParsing
   }
-}
-
-# --- Install ------------------------------------------------------------------
-# Windows locks an executable that is running, so retry for a few seconds if
-# opencode is in use (the running process keeps its old copy; new sessions use
-# the new binary). This mirrors the retry logic in toggle-guard.ps1.
-$Installed = $false
-for ($i = 0; $i -lt 5; $i++) {
-  try {
-    Move-Item -LiteralPath $Tmp -Destination $Final -Force -ErrorAction Stop
-    $Installed = $true
-    break
-  } catch {
-    Start-Sleep -Seconds 2
+  if ($Expected) {
+    $Actual = (Get-FileHash -Path $Tmp -Algorithm SHA256).Hash.ToLower()
+    if ($Actual -ne $Expected) {
+      Remove-Item -Force $Tmp -ErrorAction SilentlyContinue
+      throw "SHA256 verification failed for opencode-$Platform. Expected: $Expected. Got: $Actual. The binary was discarded because of possible tampering."
+    }
+    Write-Step "SHA256 verified correctly"
   }
-}
-if (-not $Installed) {
-  throw "Could not replace $Final (is opencode running?). The downloaded binary was kept at $Tmp."
-}
-Write-Step "Installed: $Final"
 
-# --- Marker for the guard ---
-$ActualHash = (Get-FileHash -LiteralPath $Final -Algorithm SHA256).Hash.ToLower()
-Set-Content -LiteralPath "$Final.sha256" -Value $ActualHash -NoNewline
-# Drop the guard's release cache: it may point at the previous tag, and the
-# guard would otherwise see this binary as "not published" and downgrade it.
-Remove-Item -LiteralPath (Join-Path $HOME ".opencode\.toggle-guard-tag"), `
-  (Join-Path $HOME ".opencode\.toggle-guard-sums") -Force -ErrorAction SilentlyContinue
+  # --- Backup of the current binary -------------------------------------------
+  if (Test-Path $Final) {
+    $Backup = "$Final.bak"
+    if (-not (Test-Path $Backup)) {
+      Copy-Item $Final $Backup -Force
+      Write-Step "Backup saved: $Backup"
+    } else {
+      Write-Step "Backup exists: $Backup (not overwritten)"
+    }
+  }
+
+  # --- Install ----------------------------------------------------------------
+  # Windows locks an executable that is running, so retry for a few seconds if
+  # opencode is in use (the running process keeps its old copy; new sessions use
+  # the new binary). This mirrors the retry logic in toggle-guard.ps1.
+  $Installed = $false
+  for ($i = 0; $i -lt 5; $i++) {
+    try {
+      Move-Item -LiteralPath $Tmp -Destination $Final -Force -ErrorAction Stop
+      $Installed = $true
+      break
+    } catch {
+      Start-Sleep -Seconds 2
+    }
+  }
+  if (-not $Installed) {
+    throw "Could not replace $Final (is opencode running?). The downloaded binary was kept at $Tmp."
+  }
+  Write-Step "Installed: $Final"
+
+  # --- Marker for the guard ---
+  $ActualHash = (Get-FileHash -LiteralPath $Final -Algorithm SHA256).Hash.ToLower()
+  Set-Content -LiteralPath "$Final.sha256" -Value $ActualHash -NoNewline
+  # Drop the guard's release cache: it may point at the previous tag, and the
+  # guard would otherwise see this binary as "not published" and downgrade it.
+  Remove-Item -LiteralPath (Join-Path $HOME ".opencode\.toggle-guard-tag"), `
+    (Join-Path $HOME ".opencode\.toggle-guard-sums") -Force -ErrorAction SilentlyContinue
+}
 
 # --- Residue cleanup -------------------------------------------------------------
 # Removes backups and temporary files from previous versions on update.
@@ -179,7 +197,12 @@ $Cleanup = Join-Path $HOME ".opencode\toggle-cleanup.ps1"
 if ($PSScriptRoot) {
   $LocalCleanup = Join-Path $PSScriptRoot "scripts\toggle-cleanup.ps1"
   if (Test-Path -LiteralPath $LocalCleanup) {
-    Copy-Item -LiteralPath $LocalCleanup -Destination $Cleanup -Force
+    $Same = (Test-Path -LiteralPath $Cleanup) -and
+      ((Get-FileHash -LiteralPath $LocalCleanup -Algorithm SHA256).Hash -eq
+       (Get-FileHash -LiteralPath $Cleanup -Algorithm SHA256).Hash)
+    if (-not $Same) {
+      Copy-Item -LiteralPath $LocalCleanup -Destination $Cleanup -Force
+    }
   }
 }
 if (-not (Test-Path -LiteralPath $Cleanup)) {
@@ -205,7 +228,12 @@ if ($env:TOGGLE_GUARD -ne "0") {
   $Guard = Join-Path $HOME ".opencode\toggle-guard.ps1"
   $LocalGuard = if ($PSScriptRoot) { Join-Path $PSScriptRoot "scripts\toggle-guard.ps1" } else { $null }
   if ($LocalGuard -and (Test-Path -LiteralPath $LocalGuard)) {
-    Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
+    $Same = (Test-Path -LiteralPath $Guard) -and
+      ((Get-FileHash -LiteralPath $LocalGuard -Algorithm SHA256).Hash -eq
+       (Get-FileHash -LiteralPath $Guard -Algorithm SHA256).Hash)
+    if (-not $Same) {
+      Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
+    }
   } else {
     Write-Step "Downloading toggle-guard.ps1"
     if (-not (Install-ScriptFromRelease "toggle-guard.ps1")) {

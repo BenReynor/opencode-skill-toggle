@@ -330,3 +330,21 @@ jobs:
 
       - name: Smoke test for the toggle (skill status/enable/disable + persistence)
         run: bash "$GITHUB_WORKSPACE/scripts/smoke-test.sh"
+
+      - name: Installer is idempotent (no re-download when already current)
+        run: |
+          # Use a throwaway HOME and a dummy local binary so this checks the
+          # "already up to date" path without downloading hundreds of MB again.
+          T="$(mktemp -d)"
+          H="$(mktemp -d)"
+          cp install.sh "$T/"
+          mkdir -p "$T/dist"
+          printf '#!/bin/sh\necho fake-opencode\n' > "$T/dist/opencode-$PLATFORM"
+          chmod +x "$T/dist/opencode-$PLATFORM"
+          HOME="$H" TOGGLE_GUARD=0 TOGGLE_USE_LOCAL=1 bash "$T/install.sh" >/dev/null
+          OUT="$(HOME="$H" TOGGLE_GUARD=0 TOGGLE_USE_LOCAL=1 bash "$T/install.sh" 2>&1)"
+          echo "$OUT"
+          echo "$OUT" | grep -q "Already up to date" || {
+            echo "::error::installer did not detect the up-to-date binary"
+            exit 1
+          }
