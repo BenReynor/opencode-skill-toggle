@@ -145,11 +145,22 @@ echo
 CLEANUP="$HOME/.opencode/toggle-cleanup.sh"
 if [[ -f "$SCRIPT_DIR/scripts/toggle-cleanup.sh" ]]; then
   cp "$SCRIPT_DIR/scripts/toggle-cleanup.sh" "$CLEANUP"
-elif [[ ! -f "$CLEANUP" ]]; then
-  echo ">> Downloading toggle-cleanup.sh"
-  curl -fsSL --proto =https --tlsv1.2 \
+else
+  # Download to a temporary file and move it: a failed download must never
+  # leave a truncated (unusable) script behind.
+  CLEANUP_TMP="$(mktemp)"
+  if curl -fsSL --proto =https --tlsv1.2 \
     "$RELEASE_BASE/toggle-cleanup.sh" \
-    -o "$CLEANUP" || rm -f "$CLEANUP"
+    -o "$CLEANUP_TMP" 2>/dev/null; then
+    mv -f "$CLEANUP_TMP" "$CLEANUP"
+  else
+    rm -f "$CLEANUP_TMP"
+    if [[ ! -f "$CLEANUP" ]]; then
+      echo ">> Warning: could not download toggle-cleanup.sh" >&2
+    else
+      echo ">> Keeping the existing toggle-cleanup.sh (download failed)"
+    fi
+  fi
 fi
 if [[ -f "$CLEANUP" ]]; then
   chmod +x "$CLEANUP" 2>/dev/null || true
@@ -171,11 +182,18 @@ if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
   GUARD="$HOME/.opencode/toggle-guard.sh"
   if [[ -f "$SCRIPT_DIR/scripts/toggle-guard.sh" ]]; then
     cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
-  elif ! curl -fsSL --proto =https --tlsv1.2 \
-    "$RELEASE_BASE/toggle-guard.sh" \
-    -o "$GUARD" 2>/dev/null; then
-    echo ">> Warning: could not download toggle-guard.sh; anti-overwrite guard NOT installed" >&2
-    GUARD=""
+  else
+    # Same as above: download to a temporary file, then move it into place.
+    GUARD_TMP="$(mktemp)"
+    if curl -fsSL --proto =https --tlsv1.2 \
+      "$RELEASE_BASE/toggle-guard.sh" \
+      -o "$GUARD_TMP" 2>/dev/null; then
+      mv -f "$GUARD_TMP" "$GUARD"
+    else
+      rm -f "$GUARD_TMP"
+      echo ">> Warning: could not download toggle-guard.sh; anti-overwrite guard NOT installed" >&2
+      GUARD=""
+    fi
   fi
 
   if [[ -n "$GUARD" ]]; then

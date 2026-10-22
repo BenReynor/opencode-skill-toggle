@@ -147,7 +147,17 @@ if ($PSScriptRoot) {
 }
 if (-not (Test-Path -LiteralPath $Cleanup)) {
   Write-Step "Downloading toggle-cleanup.ps1"
-  Invoke-WebRequest -Uri "$ReleaseBase/toggle-cleanup.ps1" -OutFile $Cleanup -UseBasicParsing -ErrorAction SilentlyContinue
+  # Download to a temporary file and move it: a failed download must never
+  # leave a truncated (unusable) script behind.
+  $TmpCleanup = Join-Path $env:TEMP "toggle-cleanup.download"
+  try {
+    Invoke-WebRequest -Uri "$ReleaseBase/toggle-cleanup.ps1" -OutFile $TmpCleanup -UseBasicParsing -ErrorAction Stop
+    Move-Item -LiteralPath $TmpCleanup -Destination $Cleanup -Force
+  } catch {
+    Write-Warning "Could not download toggle-cleanup.ps1"
+  } finally {
+    Remove-Item -LiteralPath $TmpCleanup -Force -ErrorAction SilentlyContinue
+  }
 }
 if (Test-Path -LiteralPath $Cleanup) {
   try {
@@ -161,35 +171,43 @@ if (Test-Path -LiteralPath $Cleanup) {
 # --- Anti-overwrite guard (Task Scheduler) -------------------------------------
 if ($env:TOGGLE_GUARD -ne "0") {
   $Guard = Join-Path $HOME ".opencode\toggle-guard.ps1"
-  if ($PSScriptRoot) {
-    $LocalGuard = Join-Path $PSScriptRoot "scripts\toggle-guard.ps1"
-    if (Test-Path -LiteralPath $LocalGuard) {
-      Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
-    } else {
-      Write-Step "Downloading toggle-guard.ps1"
-      Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
-    }
+  $LocalGuard = if ($PSScriptRoot) { Join-Path $PSScriptRoot "scripts\toggle-guard.ps1" } else { $null }
+  if ($LocalGuard -and (Test-Path -LiteralPath $LocalGuard)) {
+    Copy-Item -LiteralPath $LocalGuard -Destination $Guard -Force
   } else {
     Write-Step "Downloading toggle-guard.ps1"
-    Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $Guard -UseBasicParsing
+    # Same as above: download to a temporary file, then move it into place.
+    $TmpGuard = Join-Path $env:TEMP "toggle-guard.download"
+    try {
+      Invoke-WebRequest -Uri "$ReleaseBase/toggle-guard.ps1" -OutFile $TmpGuard -UseBasicParsing -ErrorAction Stop
+      Move-Item -LiteralPath $TmpGuard -Destination $Guard -Force
+    } catch {
+      Write-Warning "Could not download toggle-guard.ps1; the anti-overwrite guard will NOT be installed"
+      $Guard = $null
+    } finally {
+      Remove-Item -LiteralPath $TmpGuard -Force -ErrorAction SilentlyContinue
+    }
   }
+  if (-not $Guard) {
+    Write-Warning "The anti-overwrite guard will NOT be installed"
+  } else {
+    $TaskName = "opencode-skill-toggle-guard"
+    $Action = New-ScheduledTaskAction -Execute "powershell.exe" `
+      -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Guard`""
+    $TriggerRun = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+      -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration ([TimeSpan]::MaxValue)
+    $TriggerLogon = New-ScheduledTaskTrigger -AtLogOn
 
-  $TaskName = "opencode-skill-toggle-guard"
-  $Action = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Guard`""
-  $TriggerRun = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-    -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration ([TimeSpan]::MaxValue)
-  $TriggerLogon = New-ScheduledTaskTrigger -AtLogOn
-
-  try {
-    Register-ScheduledTask -TaskName $TaskName -Action $Action `
-      -Trigger $TriggerRun, $TriggerLogon -Force | Out-Null
-    Start-ScheduledTask -TaskName $TaskName
-    Write-Step "Anti-overwrite guard enabled (Task Scheduler: $TaskName)"
-    Write-Step "  - log: $(Join-Path $HOME '.opencode\toggle-guard.log')"
-    Write-Step "  - disable: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
-  } catch {
-    Write-Warning "Could not register the guard: $($_.Exception.Message)"
+    try {
+      Register-ScheduledTask -TaskName $TaskName -Action $Action `
+        -Trigger $TriggerRun, $TriggerLogon -Force | Out-Null
+      Start-ScheduledTask -TaskName $TaskName
+      Write-Step "Anti-overwrite guard enabled (Task Scheduler: $TaskName)"
+      Write-Step "  - log: $(Join-Path $HOME '.opencode\toggle-guard.log')"
+      Write-Step "  - disable: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
+    } catch {
+      Write-Warning "Could not register the guard: $($_.Exception.Message)"
+    }
   }
 } else {
   Write-Step "Anti-overwrite guard not installed (TOGGLE_GUARD=0)"

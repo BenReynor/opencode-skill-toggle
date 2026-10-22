@@ -66,6 +66,16 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
    | 🍎 macOS Apple Silicon | `opencode-darwin-arm64` |
    | 🪟 Windows x64 | `opencode-windows-x64` |
 
+   You can also put a local binary next to `install.sh` (`opencode-<platform>` or
+   `dist/opencode-<platform>`).
+3. Make it executable, back up your current binary if any, and replace
+   `~/.opencode/bin/opencode` (or `%USERPROFILE%\.opencode\bin\opencode.exe`).
+4. Run `./install.sh` or `install.ps1` from the repo **or** copy its scripts; the
+   installers copy `toggle-guard.sh`/`toggle-guard.ps1`, `toggle-cleanup.sh`/`toggle-cleanup.ps1`
+   to `~/.opencode/`, create the marker, set up the scheduler and **do not require keeping
+   the cloned repository after installation**. If you use the `curl | bash` / `irm | iex`
+   one-liners, **nothing is placed on your Desktop**.
+
 3. Replace the opencode binary:
    - **Linux/macOS**: `~/.opencode/bin/opencode` (remember `chmod +x`).
    - **Windows**: `%USERPROFILE%\.opencode\bin\opencode.exe`.
@@ -153,18 +163,24 @@ get the latest version **with** the toggle.
 
 The official update replaces `~/.opencode/bin/opencode` (or `opencode.exe`) with
 the clean binary. To make sure the toggle is never lost, the installer leaves the
-**anti-overwrite guard enabled by default**:
+**auto-updating anti-overwrite guard enabled by default**:
 
 ### 🛡️ Anti-overwrite guard (already set up)
 
-It restores the toggle silently, in the background, if the binary was replaced:
+It keeps the toggle up to date automatically, without touching your data:
 
 - After installing it leaves a **marker** with the SHA-256 of the toggle binary
-  (an `opencode.sha256` next to the binary).
-- The guard (`toggle-guard.sh` on Linux/macOS, `toggle-guard.ps1` on Windows)
-  compares that marker with the current binary; if they differ, it downloads the
-  toggle build from the newest versioned release, **verifies its SHA256** and
-  reinstalls it (atomic replacement, without interrupting what is running).
+  (an `opencode.sha256` next to the binary). Without that marker the guard
+  **never** touches an unknown binary.
+- **Restore** — if the binary was replaced (official autoupdate, `opencode upgrade`
+  or any other means), the guard downloads the newest `toggle-*` build,
+  **verifies its SHA256** against `SHA256SUMS`, makes a backup, replaces it
+  atomically (without interrupting what is running) and only updates the marker if
+  the new binary actually runs.
+- **Proactive update** — if a newer `toggle-*` build was published, the guard
+  detects it by comparing your binary's hash against the hashes in the newest
+  release and updates it automatically. The version check is cached (1 hour by
+  default) to avoid exhausting the API rate limit.
 - What triggers it on each system:
 
   | System | Mechanism |
@@ -175,7 +191,7 @@ It restores the toggle silently, in the background, if the binary was replaced:
 
 > **No process stays waiting**: there is no daemon of its own. The system
 > scheduler (already resident) does the watching and only runs the guard briefly
-> when there is something to do.
+> when there is something to do. If you're offline, it just skips the check.
 
 Check its status and disable it:
 
@@ -194,6 +210,16 @@ Unregister-ScheduledTask -TaskName 'opencode-skill-toggle-guard' -Confirm:$false
 
 # so that the installers don't re-create it
 TOGGLE_GUARD=0 ./install.sh
+```
+
+Force an immediate check/update right now:
+
+```bash
+# Linux / macOS
+bash ~/.opencode/toggle-guard.sh --update
+
+# Windows (PowerShell)
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.opencode\toggle-guard.ps1" -Update
 ```
 
 Activity log: `~/.opencode/toggle-guard.log`.

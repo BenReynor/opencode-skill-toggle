@@ -16,7 +16,16 @@ on:
     - cron: "30 4 * * *"
   push:
     branches: [main]
-    paths: ["patches/**", ".github/workflows/build-and-release.yml"]
+    # The installers and the guard are published as release assets: a change in
+    # any of them must rebuild and republish, or users would keep downloading
+    # the old ones.
+    paths:
+      - "patches/**"
+      - "scripts/**"
+      - "install.sh"
+      - "install.ps1"
+      - "build.sh"
+      - ".github/workflows/build-and-release.yml"
 
 permissions:
   contents: write
