@@ -198,6 +198,9 @@ else
   HASH_ACTUAL="$(shasum -a 256 "$ORIG" | awk '{print $1}')"
 fi
 echo "$HASH_ACTUAL" > "$ORIG.sha256"
+# Drop the guard's release cache: it may point at the previous tag, and the
+# guard would otherwise see this binary as "not published" and downgrade it.
+rm -f "$HOME/.opencode/.toggle-guard-tag" "$HOME/.opencode/.toggle-guard-sums"
 
 echo ">> opencode with skill-toggle installed: $ORIG"
 echo

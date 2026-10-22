@@ -168,6 +168,10 @@ Write-Step "Installed: $Final"
 # --- Marker for the guard ---
 $ActualHash = (Get-FileHash -LiteralPath $Final -Algorithm SHA256).Hash.ToLower()
 Set-Content -LiteralPath "$Final.sha256" -Value $ActualHash -NoNewline
+# Drop the guard's release cache: it may point at the previous tag, and the
+# guard would otherwise see this binary as "not published" and downgrade it.
+Remove-Item -LiteralPath (Join-Path $HOME ".opencode\.toggle-guard-tag"), `
+  (Join-Path $HOME ".opencode\.toggle-guard-sums") -Force -ErrorAction SilentlyContinue
 
 # --- Residue cleanup -------------------------------------------------------------
 # Removes backups and temporary files from previous versions on update.

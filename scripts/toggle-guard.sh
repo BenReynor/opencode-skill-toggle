@@ -172,6 +172,17 @@ elif [[ -f "$CACHE_SUMS" ]] &&
   REASON="update"       # our hash is not published anymore → older build
 fi
 
+# The cached release can be older than the installed binary (for example right
+# after the installer updated it). Refresh once before "updating" downwards.
+if [[ "$REASON" == "update" ]]; then
+  if refresh_cache; then
+    load_cache || true
+    if awk -v h="$CUR" '$1==h {f=1} END {exit !f}' "$CACHE_SUMS"; then
+      REASON=""
+    fi
+  fi
+fi
+
 if [[ -z "$REASON" ]]; then
   exit 0
 fi

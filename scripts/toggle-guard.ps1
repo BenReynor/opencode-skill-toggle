@@ -108,6 +108,21 @@ if ($Cur -ne $Want) {
   $Reason = "update"      # our hash is not published anymore → older build
 }
 
+# The cached release can be older than the installed binary (for example right
+# after the installer updated it). Refresh once before "updating" downwards.
+if ($Reason -eq "update") {
+  $Update = $true
+  $Fresh = Get-ReleaseInfo
+  if ($Fresh) {
+    $Release = $Fresh
+    $Published = @{}
+    foreach ($line in $Release.Sums) {
+      if ($line -match '^\s*([0-9a-fA-F]{64})\s+(\S+)') { $Published[$Matches[1].ToLower()] = $Matches[2] }
+    }
+    if ($Published.ContainsKey($Cur)) { $Reason = "" }
+  }
+}
+
 if (-not $Reason) { exit 0 }
 
 if ($Reason -eq "restore") {

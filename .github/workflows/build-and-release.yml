@@ -66,11 +66,19 @@ jobs:
             V="$(gh api repos/anomalyco/opencode/releases/latest --jq .tag_name | sed 's/^v//')"
           fi
           PUBLISHED="$(gh release view "toggle-$V" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || echo '')"
+          # The installers/guard resolve the NEWEST toggle-* tag, so that is where
+          # the smoke test and the scripts must point when no build runs.
+          NEWEST_TAG="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName \
+            --jq '[.[] | select(.tagName | startswith("toggle-"))][0].tagName' 2>/dev/null || true)"
+          # Newest release for THIS upstream version (toggle-V or a rebuild
+          # toggle-V-rN). Its PATCH_SHA256 tells whether the binary is current.
+          VERSION_TAG="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName \
+            --jq "[.[] | select(.tagName == \"toggle-$V\" or (.tagName | startswith(\"toggle-$V-\")))][0].tagName" 2>/dev/null || true)"
           # A different patch set means the published binary is stale even when
           # the version is already there: rebuild without waiting for a new
           # upstream release.
           PATCH_SHA="$(cat patches/*.patch | sha256sum | awk '{print $1}')"
-          REMOTE_PATCH_SHA="$(gh release download "toggle-$V" --repo "$GITHUB_REPOSITORY" \
+          REMOTE_PATCH_SHA="$(gh release download "$VERSION_TAG" --repo "$GITHUB_REPOSITORY" \
             --pattern PATCH_SHA256 --output - 2>/dev/null || true)"
           NEED_BUILD=0
           if [ "${{ github.event.inputs.force }}" = "true" ] || [ -z "$PUBLISHED" ] || [ "$PATCH_SHA" != "$REMOTE_PATCH_SHA" ]; then
@@ -92,7 +100,7 @@ jobs:
           if [ "$NEED_BUILD" = "1" ]; then
             DOWNLOAD_TAG="$BUILD_TAG"
           else
-            DOWNLOAD_TAG="toggle-$V"
+            DOWNLOAD_TAG="${NEWEST_TAG:-toggle-$V}"
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "tag=v$V" >> "$GITHUB_OUTPUT"
