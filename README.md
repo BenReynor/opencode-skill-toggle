@@ -121,7 +121,7 @@ Sessions created before this version keep the global configuration they had.
 
 The built-in `customize-opencode` skill is always available and cannot be
 disabled. The state lives in `~/.local/share/opencode/skills-toggle.json`
-(`%LOCALAPPDATA%\opencode\skills-toggle.json` on Windows).
+(`%USERPROFILE%\.local\share\opencode\skills-toggle.json` on Windows).
 
 ### 🔌 Query the state via the API (advanced)
 
@@ -140,6 +140,9 @@ the template used for **new** sessions (by default only the built-in skill), so
 scripts can preconfigure what new conversations start with.
 
 The `/skill-toggle` dialog does exactly the same thing for the open session.
+
+To remove the patch and return to the official build, run
+`/skill-toggle-uninstall` (see the Uninstall section below).
 
 ---
 
@@ -291,30 +294,43 @@ toggle build from the newest versioned release.
 
 ### 🗑️ Uninstall
 
-1. Remove the scheduler entry, if you installed the guard:
+Inside opencode run:
 
-   ```bash
-   # Linux
-   systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer
+```
+/skill-toggle-uninstall
+```
 
-   # macOS
-   launchctl unload -w ~/Library/LaunchAgents/com.opencode.skill-toggle-guard.plist
+and choose one of:
 
-   # Windows (PowerShell)
-   Unregister-ScheduledTask -TaskName 'opencode-skill-toggle-guard' -Confirm:$false
-   ```
+- **Restore official opencode** — removes the patch, the guard and the toggle
+  state, and installs the latest official binary (conversations and settings
+  are kept).
+- **Remove opencode completely** — the same, but deletes the binary instead of
+  restoring it.
 
-2. Delete the installed helper scripts and (optionally) the state:
+The command stops the guard first, so nothing reinstalls the patch while it
+runs. It works on Linux, macOS and Windows.
 
-   ```bash
-   rm -f ~/.opencode/toggle-guard.sh ~/.opencode/toggle-cleanup.sh
-   rm -f ~/.opencode/bin/opencode.sha256
-   rm -f ~/.local/share/opencode/skills-toggle.json
-   ```
+You can also run the same script from a terminal:
 
-3. Replace `~/.opencode/bin/opencode` with the official binary using your usual
-   method (official installer or `opencode upgrade`). The `.bak` next to it, if
-   present, is the copy saved by the installer.
+```bash
+# Linux / macOS
+bash ~/.opencode/toggle-uninstall.sh            # asks for confirmation
+bash ~/.opencode/toggle-uninstall.sh --yes      # no questions
+bash ~/.opencode/toggle-uninstall.sh --purge    # delete the binary
+bash ~/.opencode/toggle-uninstall.sh --from-backup  # offline: use opencode.bak
+```
+
+```powershell
+# Windows
+powershell -File "$HOME\.opencode\toggle-uninstall.ps1"
+powershell -File "$HOME\.opencode\toggle-uninstall.ps1" -Yes -Purge
+```
+
+If the machine is offline, the restore step cannot download the official
+binary; use `--from-backup` (`-FromBackup`) to reuse the local `opencode.bak`,
+or `--purge` to remove the toggle build. Conversations
+(`opencode.db`), settings and snapshots are never deleted by the uninstaller.
 
 ## 🔒 Security
 

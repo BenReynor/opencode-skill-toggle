@@ -39,6 +39,17 @@ fi
 # run via "curl | bash".
 DL_DIR="${TMPDIR:-/tmp}"
 
+# Temporary files are created with mktemp (unpredictable names) and removed on
+# exit, so another local user cannot plant a symlink or leave junk behind.
+CLEANUP_FILES=()
+cleanup_tmp() {
+  local f
+  for f in "${CLEANUP_FILES[@]:-}"; do
+    [[ -n "$f" ]] && rm -f "$f"
+  done
+}
+trap cleanup_tmp EXIT
+
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -54,10 +65,16 @@ sha256_of() {
 # release can never be reused).
 SCRIPT_SUMS=""
 ensure_script_sums() {
-  [[ -f "$SCRIPT_SUMS" ]] && return 0
-  curl -fsSL --proto =https --tlsv1.2 \
-    "$RELEASE_BASE/SHA256SUMS.scripts" -o "$SCRIPT_SUMS" 2>/dev/null || true
-  [[ -f "$SCRIPT_SUMS" ]]
+  [[ -s "$SCRIPT_SUMS" ]] && return 0
+  local part="${SCRIPT_SUMS}.part"
+  CLEANUP_FILES+=("$part")
+  if curl -fsSL --proto =https --tlsv1.2 \
+       "$RELEASE_BASE/SHA256SUMS.scripts" -o "$part" 2>/dev/null && [[ -s "$part" ]]; then
+    mv -f "$part" "$SCRIPT_SUMS"
+    return 0
+  fi
+  rm -f "$part"
+  return 1
 }
 script_expected() {
   local name="$1"
@@ -141,7 +158,8 @@ resolve_release_base() {
   fi
 }
 RELEASE_BASE="$(resolve_release_base)"
-SCRIPT_SUMS="$DL_DIR/.opencode-toggle-scripts-sums.${RELEASE_BASE##*/}"
+SCRIPT_SUMS="$(mktemp "$DL_DIR/.opencode-toggle-scripts-sums.XXXXXX")"
+CLEANUP_FILES+=("$SCRIPT_SUMS")
 echo ">> Release: ${RELEASE_BASE#https://github.com/$GH_REPO/releases/download/}"
 
 # --- Obtain the binary ------------------------------------------------------
@@ -152,7 +170,8 @@ BIN_SRC=""
 BIN_DOWNLOADED=0
 TARGET_HASH=""
 SHA_URL="$RELEASE_BASE/SHA256SUMS"
-SHA_FILE="$DL_DIR/.opencode-toggle-sha256.download"
+SHA_FILE="$(mktemp "$DL_DIR/.opencode-toggle-sha256.XXXXXX")"
+CLEANUP_FILES+=("$SHA_FILE")
 EXPECTED=""
 if curl -fsSL --proto =https --tlsv1.2 "$SHA_URL" -o "$SHA_FILE" 2>/dev/null; then
   EXPECTED="$(awk -v a="opencode-$PLATFORM" '$2==a {print $1; exit}' "$SHA_FILE")"
@@ -189,12 +208,20 @@ else
   if [[ -z "$BIN_SRC" ]]; then
     URL="$RELEASE_BASE/opencode-$PLATFORM"
     echo ">> Downloading: $URL"
-    BIN_SRC="$DL_DIR/.opencode-toggle-$PLATFORM.download"
+    BIN_SRC="$(mktemp "$DL_DIR/.opencode-toggle-$PLATFORM.XXXXXX")"
+    CLEANUP_FILES+=("$BIN_SRC")
     BIN_DOWNLOADED=1
     curl -fsSL --proto =https --tlsv1.2 "$URL" -o "$BIN_SRC"
 
     if [[ -z "$EXPECTED" ]]; then
-      echo ">> warning: no checksum for opencode-$PLATFORM; continuing without verification" >&2
+      if [[ "${TOGGLE_ALLOW_UNVERIFIED:-0}" == "1" ]]; then
+        echo ">> warning: no checksum for opencode-$PLATFORM; continuing unverified (TOGGLE_ALLOW_UNVERIFIED=1)" >&2
+      else
+        echo "ERROR: no SHA256 checksum for opencode-$PLATFORM in $SHA_URL" >&2
+        echo "  Refusing to install an unverified binary." >&2
+        echo "  Set TOGGLE_ALLOW_UNVERIFIED=1 to override (not recommended)." >&2
+        exit 1
+      fi
     else
       echo ">> Verifying SHA256 against $SHA_URL"
       ACTUAL="$(sha256_of "$BIN_SRC")"
@@ -224,7 +251,8 @@ if [[ "$UP_TO_DATE" != "1" ]]; then
   # Atomic replacement (mv): does not fail with "Text file busy" even when
   # opencode is running. The running process keeps its old inode, and new
   # sessions use the new binary.
-  TMP="$ORIG.tmp.$$"
+  TMP="$(mktemp "$ORIG.XXXXXX")"
+  CLEANUP_FILES+=("$TMP")
   cp "$BIN_SRC" "$TMP"
   chmod +x "$TMP"
   mv -f "$TMP" "$ORIG"
@@ -384,6 +412,22 @@ else
   echo ">> Anti-overwrite guard not installed (TOGGLE_GUARD=0)"
 fi
 
+# --- Uninstaller ------------------------------------------------------------
+# Installed even when the guard is disabled: the slash command and the manual
+# script are the supported way out of a custom build.
+UNINSTALL="$HOME/.opencode/toggle-uninstall.sh"
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/scripts/toggle-uninstall.sh" ]]; then
+  if [[ ! -f "$UNINSTALL" ]] || \
+     [[ "$(sha256_of "$SCRIPT_DIR/scripts/toggle-uninstall.sh")" != "$(sha256_of "$UNINSTALL")" ]]; then
+    cp "$SCRIPT_DIR/scripts/toggle-uninstall.sh" "$UNINSTALL"
+  fi
+elif ! download_script "toggle-uninstall.sh" "$UNINSTALL"; then
+  if [[ ! -f "$UNINSTALL" ]]; then
+    echo ">> Warning: could not download toggle-uninstall.sh" >&2
+  fi
+fi
+chmod +x "$UNINSTALL" 2>/dev/null || true
+
 cat <<'EOF'
 Important notice:
   - This is a custom (non-official) build. It keeps your real opencode.db.
@@ -395,5 +439,7 @@ Important notice:
   - The replacement is atomic: you can reinstall even while opencode is open.
   - Automatic residue cleanup on update (removes .bak and temporary files from
     previous versions; keeps one with TOGGLE_CLEANUP_KEEP_BACKUP=1).
+  - Uninstall: /skill-toggle-uninstall inside opencode, or
+    bash ~/.opencode/toggle-uninstall.sh
   - Restart opencode for the new binary to take effect.
 EOF

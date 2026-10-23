@@ -122,6 +122,7 @@ HTTP="$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -X POST "$BASE/sess
   -H 'content-type: application/json' -d '{"command":"hello","arguments":""}')"
 case "$HTTP" in
   2*) echo "FAIL: a disabled skill's command was accepted (HTTP $HTTP)"; exit 1 ;;
+  "" | 000*) echo "FAIL: the command request failed (no HTTP response)"; exit 1 ;;
 esac
 
 debug "8) state file uses the per-session format"

@@ -1,3 +1,19 @@
+diff --git a/packages/opencode/script/build.ts b/packages/opencode/script/build.ts
+index b713911..1f92807 100755
+--- a/packages/opencode/script/build.ts
++++ b/packages/opencode/script/build.ts
+@@ -166,9 +166,9 @@ for (const item of targets) {
+     plugins: [plugin],
+     external: ["node-gyp"],
+     format: "esm",
+-    minify: true,
++    minify: process.env.MINIFY !== "0",
+     sourcemap: sourcemapsFlag ? "linked" : "none",
+-    splitting: true,
++    splitting: process.env.SPLIT !== "0",
+     compile: {
+       autoloadBunfig: false,
+       autoloadDotenv: false,
 diff --git a/packages/opencode/src/server/routes/instance/httpapi/api.ts b/packages/opencode/src/server/routes/instance/httpapi/api.ts
 index f5076ad..5fabc03 100644
 --- a/packages/opencode/src/server/routes/instance/httpapi/api.ts
@@ -267,7 +283,7 @@ index 61ab74d..3c38aae 100644
          return [
            "Skills provide specialized instructions and workflows for specific tasks.",
 diff --git a/packages/opencode/src/skill/index.ts b/packages/opencode/src/skill/index.ts
-index 5a04ec2..7f26131 100644
+index 5a04ec2..e74e4d4 100644
 --- a/packages/opencode/src/skill/index.ts
 +++ b/packages/opencode/src/skill/index.ts
 @@ -96,12 +96,45 @@ type ScanState = {
@@ -318,7 +334,7 @@ index 5a04ec2..7f26131 100644
  const add = Effect.fnUntraced(function* (state: State, match: string, events: EventV2Bridge.Service["Service"]) {
    const md = yield* Effect.tryPromise({
      try: () => ConfigMarkdown.parse(match),
-@@ -291,11 +324,164 @@ const layer = Layer.effect(
+@@ -291,11 +324,195 @@ const layer = Layer.effect(
        return s.skills[name]
      })
  
@@ -334,29 +350,55 @@ index 5a04ec2..7f26131 100644
 +    })
 +
 +    let store: ToggleStore = emptyStore()
++    // Sessions whose enabled map this process changed on purpose. While a
++    // session is dirty a stale disk copy cannot overwrite the local change;
++    // once it is persisted the flag is cleared so later external edits win.
++    const dirty = new Set<string>()
++    let defaultsDirty = false
 +
-+    const persist = Effect.fn("Skill.persistToggle")(function* () {
-+      // Pick up sessions written by another process since we loaded the file so
-+      // a toggle in one session does not erase a concurrent one elsewhere.
-+      const current = yield* fsys.readFileStringSafe(toggleFile()).pipe(Effect.orElseSucceed(() => undefined))
-+      if (current) {
-+        let parsed: unknown = null
-+        try {
-+          parsed = JSON.parse(current)
-+        } catch {
-+          parsed = null
-+        }
-+        if (isRecord(parsed) && parsed.version === TOGGLE_VERSION && isRecord(parsed.sessions)) {
-+          for (const [id, value] of Object.entries(parsed.sessions)) {
-+            if (store.sessions[id]) continue
-+            if (!isRecord(value) || !isBooleanRecord(value.enabled)) continue
-+            store.sessions[id] = {
-+              touchedAt: typeof value.touchedAt === "number" ? value.touchedAt : 0,
-+              enabled: value.enabled,
-+            }
-+          }
++    const normalizeSessions = (sessions: unknown): Record<string, SessionToggle> => {
++      const result: Record<string, SessionToggle> = {}
++      if (!isRecord(sessions)) return result
++      for (const [id, value] of Object.entries(sessions)) {
++        if (!isRecord(value) || !isBooleanRecord(value.enabled)) continue
++        result[id] = {
++          touchedAt: typeof value.touchedAt === "number" ? value.touchedAt : 0,
++          enabled: value.enabled,
 +        }
 +      }
++      return result
++    }
++
++    const readStore = Effect.fn("Skill.readToggleStore")(function* () {
++      const current = yield* fsys.readFileStringSafe(toggleFile()).pipe(Effect.orElseSucceed(() => undefined))
++      if (!current) return undefined
++      let parsed: unknown = null
++      try {
++        parsed = JSON.parse(current)
++      } catch {
++        parsed = null
++      }
++      if (!isRecord(parsed) || parsed.version !== TOGGLE_VERSION || !isRecord(parsed.sessions)) return undefined
++      return parsed
++    })
++
++    // Merge the state on disk so another process's writes are never lost. The
++    // disk copy wins over any session this process only created defaults for,
++    // which is what fixes two processes clobbering each other on startup.
++    const mergeFromDisk = Effect.fn("Skill.mergeToggleStore")(function* () {
++      const parsed = yield* readStore()
++      if (!parsed) return
++      for (const [id, value] of Object.entries(normalizeSessions(parsed.sessions))) {
++        if (dirty.has(id)) continue
++        store.sessions[id] = value
++      }
++      if (!defaultsDirty && isBooleanRecord(parsed.defaults)) store.defaults = parsed.defaults
++      if (isBooleanRecord(parsed.legacy)) store.legacy = parsed.legacy
++      if (typeof parsed.migratedAt === "number") store.migratedAt = parsed.migratedAt
++    })
++
++    const persist = Effect.fn("Skill.persistToggle")(function* () {
++      yield* mergeFromDisk()
 +
 +      const ids = Object.keys(store.sessions)
 +      if (ids.length > TOGGLE_KEEP_SESSIONS) {
@@ -439,8 +481,12 @@ index 5a04ec2..7f26131 100644
 +      })
 +
 +    const ensure = Effect.fn("Skill.ensureToggle")(function* (sessionID?: string, createdAt?: number) {
-       const s = yield* InstanceState.get(state)
++      const s = yield* InstanceState.get(state)
 +      if (!sessionID) return store.defaults
++      // Adopt the on-disk copy first: it can be newer than this process's
++      // view (another process toggled it, or this process restarted) and must
++      // never be replaced by defaults built here.
++      yield* mergeFromDisk()
 +      const existing = store.sessions[sessionID]
 +      if (existing) {
 +        existing.touchedAt = Date.now()
@@ -456,7 +502,8 @@ index 5a04ec2..7f26131 100644
 +      }
 +      store.sessions[sessionID] = { touchedAt: Date.now(), enabled: config }
 +      yield* persist()
-+      return config
++      // persist() merges disk again, so return what actually won.
++      return store.sessions[sessionID]?.enabled ?? config
 +    })
 +
 +    const isOn = (name: string, config: Record<string, boolean>) =>
@@ -471,7 +518,7 @@ index 5a04ec2..7f26131 100644
 +    })
 +
 +    const require = Effect.fn("Skill.require")(function* (name: string, sessionID?: string, createdAt?: number) {
-+      const s = yield* InstanceState.get(state)
+       const s = yield* InstanceState.get(state)
 +      const config = yield* ensure(sessionID, createdAt)
        const info = s.skills[name]
 -      if (info) return info
@@ -486,7 +533,7 @@ index 5a04ec2..7f26131 100644
      })
  
      const all = Effect.fn("Skill.all")(function* () {
-@@ -307,14 +493,75 @@ const layer = Layer.effect(
+@@ -307,14 +524,89 @@ const layer = Layer.effect(
        return (yield* InstanceState.get(discovered)).dirs
      })
  
@@ -533,8 +580,15 @@ index 5a04ec2..7f26131 100644
 +        return false
 +      }
 +      config[name] = true
-+      if (sessionID && store.sessions[sessionID]) store.sessions[sessionID].touchedAt = Date.now()
++      if (sessionID) {
++        if (store.sessions[sessionID]) store.sessions[sessionID].touchedAt = Date.now()
++        dirty.add(sessionID)
++      } else {
++        defaultsDirty = true
++      }
 +      yield* persist()
++      if (sessionID) dirty.delete(sessionID)
++      else defaultsDirty = false
 +      yield* Effect.logInfo("skill enabled", { name, session: sessionID })
 +      return true
 +    })
@@ -555,8 +609,15 @@ index 5a04ec2..7f26131 100644
 +        return false
 +      }
 +      config[name] = false
-+      if (sessionID && store.sessions[sessionID]) store.sessions[sessionID].touchedAt = Date.now()
++      if (sessionID) {
++        if (store.sessions[sessionID]) store.sessions[sessionID].touchedAt = Date.now()
++        dirty.add(sessionID)
++      } else {
++        defaultsDirty = true
++      }
 +      yield* persist()
++      if (sessionID) dirty.delete(sessionID)
++      else defaultsDirty = false
 +      yield* Effect.logInfo("skill disabled", { name, session: sessionID })
 +      return true
 +    })
@@ -970,18 +1031,19 @@ index 5ac9bd7..1077702 100644
    body?: never
    path?: never
 diff --git a/packages/tui/src/app.tsx b/packages/tui/src/app.tsx
-index 1b21aaf..181602d 100644
+index 1b21aaf..8b6ba89 100644
 --- a/packages/tui/src/app.tsx
 +++ b/packages/tui/src/app.tsx
-@@ -42,6 +42,7 @@ import { PermissionProvider } from "./context/permission"
+@@ -42,6 +42,8 @@ import { PermissionProvider } from "./context/permission"
  import { DialogModel } from "./component/dialog-model"
  import { useConnected } from "./component/use-connected"
  import { DialogMcp } from "./component/dialog-mcp"
 +import { DialogSkillToggle } from "./component/dialog-skill-toggle"
++import { DialogSkillUninstall } from "./component/dialog-skill-uninstall"
  import { DialogStatus } from "./component/dialog-status"
  import { DialogDebug } from "./component/dialog-debug"
  import { DialogThemeList } from "./component/dialog-theme-list"
-@@ -111,6 +112,7 @@ const appBindingCommands = [
+@@ -111,6 +113,7 @@ const appBindingCommands = [
    "model.cycle_favorite_reverse",
    "agent.list",
    "mcp.list",
@@ -989,7 +1051,7 @@ index 1b21aaf..181602d 100644
    "agent.cycle",
    "agent.cycle.reverse",
    "variant.cycle",
-@@ -680,6 +682,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
+@@ -680,6 +683,24 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
            dialog.replace(() => <DialogMcp />)
          },
        },
@@ -1000,6 +1062,15 @@ index 1b21aaf..181602d 100644
 +        slashName: "skill-toggle",
 +        run: () => {
 +          dialog.replace(() => <DialogSkillToggle />)
++        },
++      },
++      {
++        name: "skill.uninstall",
++        title: "Uninstall Skill Toggle",
++        category: "Agent",
++        slashName: "skill-toggle-uninstall",
++        run: () => {
++          dialog.replace(() => <DialogSkillUninstall />)
 +        },
 +      },
        {
@@ -1148,6 +1219,71 @@ index 0000000..9aea506
 +  )
 +}
 \ No newline at end of file
+diff --git a/packages/tui/src/component/dialog-skill-uninstall.tsx b/packages/tui/src/component/dialog-skill-uninstall.tsx
+new file mode 100644
+index 0000000..52eba33
+--- /dev/null
++++ b/packages/tui/src/component/dialog-skill-uninstall.tsx
+@@ -0,0 +1,59 @@
++import { spawn } from "node:child_process"
++import os from "node:os"
++import path from "node:path"
++import { useExit } from "../context/exit"
++import { useDialog } from "../ui/dialog"
++import { DialogSelect } from "../ui/dialog-select"
++
++type Choice = "restore" | "remove" | "cancel"
++
++export function DialogSkillUninstall() {
++  const exit = useExit()
++  const dialog = useDialog()
++
++  // The uninstaller has to run after this process releases the binary (on
++  // Windows a running .exe cannot be replaced), so it is detached and delayed.
++  const launch = (purge: boolean) => {
++    const home = os.homedir()
++    const script = path.join(home, ".opencode", process.platform === "win32" ? "toggle-uninstall.ps1" : "toggle-uninstall.sh")
++    const options = { detached: true, stdio: "ignore" as const, cwd: home }
++    if (process.platform === "win32") {
++      const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Yes"]
++      if (purge) args.push("-Purge")
++      spawn("powershell.exe", args, options).unref()
++    } else {
++      const args = purge ? ["--yes", "--purge"] : ["--yes"]
++      spawn("bash", ["-c", 'sleep 1; exec bash "$0" "$@"', script, ...args], options).unref()
++    }
++    dialog.clear()
++    exit()
++  }
++
++  return (
++    <DialogSelect<Choice>
++      title="Uninstall skill-toggle"
++      options={[
++        {
++          value: "restore",
++          title: "Restore official opencode",
++          description: "Remove the toggle patch and keep your sessions and settings",
++        },
++        {
++          value: "remove",
++          title: "Remove opencode completely",
++          description: "Delete the binary, guard and scripts; conversation data is kept",
++        },
++        {
++          value: "cancel",
++          title: "Cancel",
++          description: "Leave everything as it is",
++        },
++      ]}
++      onSelect={(option) => {
++        if (option.value === "restore") return launch(false)
++        if (option.value === "remove") return launch(true)
++        dialog.clear()
++      }}
++    />
++  )
++}
 diff --git a/packages/tui/src/component/dialog-status.tsx b/packages/tui/src/component/dialog-status.tsx
 index 1adab3e..ede2bca 100644
 --- a/packages/tui/src/component/dialog-status.tsx

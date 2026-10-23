@@ -266,6 +266,26 @@ if ($env:TOGGLE_GUARD -ne "0") {
   Write-Step "Anti-overwrite guard not installed (TOGGLE_GUARD=0)"
 }
 
+# --- Uninstaller -----------------------------------------------------------------
+# Installed even when the guard is disabled: the slash command and the manual
+# script are the supported way out of a custom build.
+$Uninstall = Join-Path $HOME ".opencode\toggle-uninstall.ps1"
+if ($PSScriptRoot) {
+  $LocalUninstall = Join-Path $PSScriptRoot "scripts\toggle-uninstall.ps1"
+  if (Test-Path -LiteralPath $LocalUninstall) {
+    $Same = (Test-Path -LiteralPath $Uninstall) -and
+      ((Get-FileHash -LiteralPath $LocalUninstall -Algorithm SHA256).Hash -eq
+       (Get-FileHash -LiteralPath $Uninstall -Algorithm SHA256).Hash)
+    if (-not $Same) {
+      Copy-Item -LiteralPath $LocalUninstall -Destination $Uninstall -Force
+    }
+  }
+}
+if (-not (Test-Path -LiteralPath $Uninstall)) {
+  Write-Step "Downloading toggle-uninstall.ps1"
+  Install-ScriptFromRelease "toggle-uninstall.ps1" | Out-Null
+}
+
 Write-Host ""
 Write-Host @"
 Important notice:
@@ -278,5 +298,7 @@ Important notice:
       click "More info" > "Run anyway".
   - Automatic residue cleanup on update (removes .bak and temporary files from
       previous versions; keeps one with TOGGLE_CLEANUP_KEEP_BACKUP=1).
+  - Uninstall: /skill-toggle-uninstall inside opencode, or
+      powershell -File "$HOME\.opencode\toggle-uninstall.ps1"
   - Restart opencode for the new binary to take effect.
 "@

@@ -257,6 +257,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/scripts"
           sha256sum toggle-guard.sh toggle-guard.ps1 toggle-cleanup.sh toggle-cleanup.ps1 \
+            toggle-uninstall.sh toggle-uninstall.ps1 \
             > "$RUNNER_TEMP/SHA256SUMS.scripts"
 
       - name: Publish installers and guards
@@ -265,7 +266,8 @@ jobs:
         run: |
           FILES=()
           for f in install.sh install.ps1 scripts/toggle-guard.sh scripts/toggle-guard.ps1 \
-                   scripts/toggle-cleanup.sh scripts/toggle-cleanup.ps1; do
+                   scripts/toggle-cleanup.sh scripts/toggle-cleanup.ps1 \
+                   scripts/toggle-uninstall.sh scripts/toggle-uninstall.ps1; do
             if [ -f "$GITHUB_WORKSPACE/$f" ]; then
               FILES+=("$GITHUB_WORKSPACE/$f")
             else

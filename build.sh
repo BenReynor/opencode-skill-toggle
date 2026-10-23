@@ -11,7 +11,7 @@
 #   ./build.sh latest          # compiles the latest published version (requires updating patches)
 #   ./build.sh 1.19.3          # compiles a specific version
 #   MINIFY=0 ./build.sh        # without minification (debugging only)
-#   KEEP_SRC=1 ./build.sh      # keeps the extracted source (debugging)
+#   KEEP_SRC=1 ./build.sh      # accepted for compatibility (source is kept anyway)
 #
 set -euo pipefail
 
@@ -41,18 +41,18 @@ fi
 echo ">> Building opencode $VER (tag $TAG)"
 
 # --- Download and extract the tarball -----------------------------------------
-if [[ -d "$SRC" && "${KEEP_SRC:-0}" != "1" ]]; then
-  echo ">> Reusing extracted source at $SRC"
-elif [[ -d "$SRC" ]]; then
-  echo ">> Reusing extracted source (KEEP_SRC=1) at $SRC"
-else
-  echo ">> Downloading opencode $VER..."
-  mkdir -p "$WORK/src"
-  curl -fsSL --proto =https --tlsv1.2 "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/$TAG" \
-    -o "$WORK/src/opencode-$VER.tar.gz"
-  tar -xzf "$WORK/src/opencode-$VER.tar.gz" -C "$WORK/src"
-  rm -f "$WORK/src/opencode-$VER.tar.gz"
+# Always start from a clean tree: reusing a directory that already has the
+# patches applied makes `patch` fail and leaves a half-built tree behind.
+if [[ -d "$SRC" ]]; then
+  echo ">> Removing previous source tree at $SRC"
+  rm -rf "$SRC"
 fi
+echo ">> Downloading opencode $VER..."
+mkdir -p "$WORK/src"
+curl -fsSL --proto =https --tlsv1.2 "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/$TAG" \
+  -o "$WORK/src/opencode-$VER.tar.gz"
+tar -xzf "$WORK/src/opencode-$VER.tar.gz" -C "$WORK/src"
+rm -f "$WORK/src/opencode-$VER.tar.gz"
 
 echo ">> Applying patches..."
 cd "$SRC"
