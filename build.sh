@@ -57,7 +57,7 @@ rm -f "$WORK/src/opencode-$VER.tar.gz"
 echo ">> Applying patches..."
 cd "$SRC"
 patch -p1 --forward < "$SCRIPT_DIR/patches/00-skill-toggle.patch"
-patch -p1 --forward < "$SCRIPT_DIR/patches/01-build-local-fix.patch"
+# 01-build-local-fix.patch (MINIFY/SPLIT env vars) is now upstream in v1.19.4+
 echo ">> Patches applied."
 
 echo ">> Installing dependencies..."

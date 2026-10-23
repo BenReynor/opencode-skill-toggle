@@ -140,6 +140,11 @@ jobs:
           cd /tmp/opencode-src
           for p in "$GITHUB_WORKSPACE"/patches/*.patch; do
             echo ">> Applying $p"
+            # Skip 01-build-local-fix.patch: MINIFY/SPLIT env vars are upstream since v1.19.4
+            if [[ "$p" == *01-build-local-fix.patch ]]; then
+              echo ">> Skipping $p (upstream since v1.19.4)"
+              continue
+            fi
             if ! git apply --3way "$p"; then
               TITLE="Patches need update for ${{ needs.detect.outputs.tag }}"
               EXISTING="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
