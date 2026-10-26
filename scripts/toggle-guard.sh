@@ -74,8 +74,24 @@ detect_platform() {
   os="$(uname -s)"
   arch="$(uname -m)"
   case "$os:$arch" in
-    Linux:x86_64)                echo "linux-x64" ;;
-    Linux:aarch64 | Linux:arm64) echo "linux-arm64" ;;
+    Linux:x86_64 | Linux:amd64)
+      # musl (Alpine) and CPUs without AVX2 need their own builds: the plain
+      # linux-x64 binary crashes there. (No baseline+musl build is published.)
+      if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1 || ldd --version 2>&1 | grep -qi musl; then
+        echo "linux-x64-musl"
+      elif grep -qw avx2 /proc/cpuinfo 2>/dev/null; then
+        echo "linux-x64"
+      else
+        echo "linux-x64-baseline"
+      fi
+      ;;
+    Linux:aarch64 | Linux:arm64)
+      if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1 || ldd --version 2>&1 | grep -qi musl; then
+        echo "linux-arm64-musl"
+      else
+        echo "linux-arm64"
+      fi
+      ;;
     Darwin:arm64)                echo "darwin-arm64" ;;
     Darwin:x86_64)               echo "darwin-x64" ;;
     *)                           echo "unsupported:$os:$arch" ;;
