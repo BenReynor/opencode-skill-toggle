@@ -14,7 +14,7 @@ esac
 
 WORK="$RUNNER_TEMP/skiptest"
 rm -rf "$WORK"
-mkdir -p "$WORK/bin" "$WORK/proj/.opencode/skills/hello"
+mkdir -p "$WORK/bin" "$WORK/proj/.opencode/skills/hello" "$WORK/proj/.opencode/skills/hello2" "$WORK/proj/.opencode/skills/hello3"
 BIN="$WORK/bin/$NAME"
 
 debug "downloading binary from $DOWNLOAD_BASE/opencode-$PLATFORM"
@@ -36,6 +36,11 @@ description: Test skill to validate the per-session toggle.
 ---
 Say hello and return hello-world.
 MD
+
+for extra in hello2 hello3; do
+  printf -- '---\nname: %s\ndescription: Extra skill for the concurrency test.\n---\nSay hi.\n' "$extra" \
+    > "$WORK/proj/.opencode/skills/$extra/SKILL.md"
+done
 
 export HOME="$WORK/home"
 export XDG_DATA_HOME="$WORK/home/data" XDG_CONFIG_HOME="$WORK/home/config"
@@ -130,6 +135,83 @@ STATE="$XDG_DATA_HOME/opencode/skills-toggle.json"
 [ -f "$STATE" ] || { echo "FAIL: $STATE was not created"; exit 1; }
 grep -q '"version": *2' "$STATE" || { echo "FAIL: state file is not version 2"; exit 1; }
 grep -q "$S1" "$STATE" || { echo "FAIL: session $S1 is not recorded in the state file"; exit 1; }
+
+debug "9) invalid skill names and session ids are rejected, never stored"
+case "$(enable toString "$S1")" in true) echo "FAIL: an inherited property name was accepted as a skill"; exit 1 ;; esac
+case "$(enable nosuchskill "$S1")" in true) echo "FAIL: an unknown skill was enabled"; exit 1 ;; esac
+case "$(enable hello nope_123)" in true) echo "FAIL: an unknown session id was accepted"; exit 1 ;; esac
+case "$(enable hello ses_doesnotexist0000)" in true) echo "FAIL: a session that does not exist was accepted"; exit 1 ;; esac
+case "$(enable hello __proto__)" in true) echo "FAIL: __proto__ was accepted as a session id"; exit 1 ;; esac
+for bad in toString nope_123 ses_doesnotexist0000 __proto__; do
+  if grep -q "\"$bad\"" "$STATE"; then echo "FAIL: '$bad' was written to the state file"; exit 1; fi
+done
+
+debug "10) a subagent (child) session inherits its parent's skills"
+enable hello "$S1" >/dev/null
+CHILD="$(api -X POST "$BASE/session" -H 'content-type: application/json' -d "{\"parentID\":\"$S1\"}" | session_id)"
+[ -n "$CHILD" ] || { echo "FAIL: could not create a child session"; exit 1; }
+has "$(status "$CHILD")" '"hello":true' || { echo "FAIL: the child session did not inherit hello"; exit 1; }
+has "$(status "$CHILD")" '"hello2":false' || { echo "FAIL: the child session enabled a skill its parent does not have"; exit 1; }
+
+debug "11) parallel toggles on one session are not lost"
+S3="$(api -X POST "$BASE/session" -H 'content-type: application/json' -d '{}' | session_id)"
+for round in 1 2 3; do
+  pids=()
+  for sk in hello hello2 hello3; do api -X POST "$BASE/skill/$sk/enable?session=$S3" >/dev/null & pids+=("$!"); done
+  wait "${pids[@]}"
+  BODY="$(status "$S3")"
+  for sk in hello hello2 hello3; do has "$BODY" "\"$sk\":true" || { echo "FAIL: parallel enable of $sk was lost (round $round): $BODY"; exit 1; }; done
+  pids=()
+  for sk in hello hello2 hello3; do api -X POST "$BASE/skill/$sk/disable?session=$S3" >/dev/null & pids+=("$!"); done
+  wait "${pids[@]}"
+  BODY="$(status "$S3")"
+  for sk in hello hello2 hello3; do has "$BODY" "\"$sk\":false" || { echo "FAIL: parallel disable of $sk was lost (round $round): $BODY"; exit 1; }; done
+done
+
+debug "12) two opencode processes sharing the state file do not lose each other's changes"
+PORT2=$((PORT + 1))
+"$BIN" serve --port "$PORT2" --log-level ERROR >>"$LOG" 2>&1 &
+SERVER2_PID=$!
+trap 'kill "$SERVER_PID" "$SERVER2_PID" 2>/dev/null || true' EXIT
+for _ in $(seq 1 60); do curl -fs --max-time 2 "http://127.0.0.1:$PORT2/global/health" >/dev/null 2>&1 && break; sleep 1; done
+BASE2="http://127.0.0.1:$PORT2"
+S4="$(api -X POST "$BASE2/session" -H 'content-type: application/json' -d '{}' | session_id)"
+for round in 1 2 3; do
+  pids=()
+  for sk in hello hello2 hello3; do
+    api -X POST "$BASE/skill/$sk/enable?session=$S3" >/dev/null & pids+=("$!")
+    api -X POST "$BASE2/skill/$sk/enable?session=$S4" >/dev/null & pids+=("$!")
+  done
+  wait "${pids[@]}"
+  for target in "$BASE $S3" "$BASE2 $S4"; do
+    set -- $target
+    BODY="$(api "$1/skill/status?session=$2")"
+    for sk in hello hello2 hello3; do has "$BODY" "\"$sk\":true" || { echo "FAIL: cross-process enable of $sk lost on $2 (round $round): $BODY"; exit 1; }; done
+  done
+  pids=()
+  for sk in hello hello2 hello3; do
+    api -X POST "$BASE/skill/$sk/disable?session=$S3" >/dev/null & pids+=("$!")
+    api -X POST "$BASE2/skill/$sk/disable?session=$S4" >/dev/null & pids+=("$!")
+  done
+  wait "${pids[@]}"
+done
+kill "$SERVER2_PID" 2>/dev/null || true
+wait "$SERVER2_PID" 2>/dev/null || true
+
+debug "13) a state file from a newer version or a corrupt one is backed up, not destroyed"
+kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null || true
+sleep 1
+FUTURE='{"version":3,"sessions":{"ses_future1":{"enabled":{"hello":true},"touchedAt":1}}}'
+printf '%s' "$FUTURE" > "$STATE"
+start_server
+status >/dev/null
+[ -f "$STATE.v3.bak" ] && [ "$(cat "$STATE.v3.bak")" = "$FUTURE" ] || { echo "FAIL: a version-3 state file was not backed up"; exit 1; }
+kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null || true
+sleep 1
+printf '{ "version": 2, "sessions": {' > "$STATE"
+start_server
+status >/dev/null
+[ -f "$STATE.corrupt.bak" ] || { echo "FAIL: a corrupt state file was not backed up"; exit 1; }
 
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true

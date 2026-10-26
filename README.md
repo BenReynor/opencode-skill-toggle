@@ -118,10 +118,14 @@ The change applies to the **current session** and is saved to disk instantly;
 that session keeps it across restarts. 🔁 A **new session starts with only the
 built-in skill enabled**, so disabled skills do not clutter every conversation.
 Sessions created before this version keep the global configuration they had.
+**Subagent sessions** (the ones the `task` tool opens) start with a copy of their
+parent session's skills instead of an empty set.
 
 The built-in `customize-opencode` skill is always available and cannot be
 disabled. The state lives in `~/.local/share/opencode/skills-toggle.json`
 (`%USERPROFILE%\.local\share\opencode\skills-toggle.json` on Windows).
+If that file is corrupt or was written by a newer version, it is copied to
+`skills-toggle.json.corrupt.bak` / `.v<N>.bak` before a fresh one is created.
 
 ### 🔌 Query the state via the API (advanced)
 
