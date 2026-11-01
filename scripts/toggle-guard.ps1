@@ -77,6 +77,7 @@ function Get-ReleaseInfo {
       New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null
       Set-Content -LiteralPath $CacheTag -Value $tag -NoNewline
       Set-Content -LiteralPath $CacheSums -Value $sumsText -NoNewline
+      $script:Refreshed = $true
     }
     if (-not (Test-Path -LiteralPath $CacheTag)) { return $null }
     $tag = (Get-Content -LiteralPath $CacheTag -Raw).Trim()
@@ -91,10 +92,49 @@ function Get-ReleaseInfo {
   }
 }
 
+# Self-update of the helper scripts. Fixes to the guard, cleanup and uninstall
+# scripts are published next to the binary (SHA256SUMS.scripts). Only scripts
+# that are already installed are replaced, only when their published hash
+# differs, and only after the download matches it. PowerShell parses the whole
+# script before running it, so replacing the running guard is safe.
+function Update-HelperScripts([string]$Base, [string]$Tag) {
+  try {
+    $sumsText = (Invoke-WebRequest -Uri "$Base/SHA256SUMS.scripts" -UseBasicParsing -ErrorAction Stop).Content
+    if ($sumsText -is [byte[]]) { $sumsText = [System.Text.Encoding]::UTF8.GetString($sumsText) }
+  } catch { return }
+  $sums = @{}
+  foreach ($line in ($sumsText -split "`n")) {
+    if ($line -match '^\s*([0-9a-fA-F]{64})\s+(?:\./)?(\S+)') { $sums[$Matches[2]] = $Matches[1].ToLower() }
+  }
+  foreach ($name in @("toggle-guard.ps1", "toggle-cleanup.ps1", "toggle-uninstall.ps1")) {
+    $dest = Join-Path $CacheDir $name
+    if (-not (Test-Path -LiteralPath $dest)) { continue }
+    $expected = $sums[$name]
+    if (-not $expected) { continue }
+    if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLower() -eq $expected) { continue }
+    $tmp = Join-Path $CacheDir ".$name.$PID.download"
+    try {
+      Invoke-WebRequest -Uri "$Base/$name" -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+      if ((Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw "checksum mismatch" }
+      Move-Item -LiteralPath $tmp -Destination $dest -Force
+      Guard-Log "updated $name from $Tag"
+    } catch {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      Guard-Log "could not update $name from $Tag ($($_.Exception.Message)); will retry"
+    }
+  }
+}
+
 if (-not (Test-Path -LiteralPath $Bin)) { exit 0 }
 
+$script:Refreshed = $false
 $Release = Get-ReleaseInfo
 if (-not $Release) { Guard-Log "could not resolve the newest release; skipping"; exit 0 }
+
+# At most once per cache period (when the release info was just refreshed).
+if ($script:Refreshed -and $env:TOGGLE_GUARD_SELF_UPDATE -ne "0") {
+  Update-HelperScripts $Release.Base $Release.Tag
+}
 
 $Cur = (Get-FileHash -LiteralPath $Bin -Algorithm SHA256).Hash.ToLower()
 $Want = if (Test-Path -LiteralPath $Marker) { (Get-Content -LiteralPath $Marker -Raw).Trim().ToLower() } else { "" }

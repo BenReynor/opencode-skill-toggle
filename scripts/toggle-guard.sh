@@ -153,7 +153,41 @@ refresh_cache() {
   rm -f "$tmp"
   TAG="$t"
   RELEASE_BASE="https://github.com/$GH_REPO/releases/download/$t"
+  REFRESHED=1
   return 0
+}
+
+# --- Self-update of the helper scripts ---------------------------------------
+# Fixes to the guard, cleanup and uninstall scripts are published next to the
+# binary (SHA256SUMS.scripts). Only scripts that are already installed are
+# replaced, only when their published hash differs, and only after the download
+# matches it. The rename is atomic, so replacing the running guard is safe: bash
+# keeps reading the old file it already opened.
+self_update_scripts() {
+  local sums name dest tmp expected
+  sums="$(mktemp)"
+  if ! curl -fsSL --proto =https --tlsv1.2 "$RELEASE_BASE/SHA256SUMS.scripts" -o "$sums" 2>/dev/null \
+     || [[ ! -s "$sums" ]]; then
+    rm -f "$sums"
+    return 0
+  fi
+  for name in toggle-guard.sh toggle-cleanup.sh toggle-uninstall.sh; do
+    dest="$CACHE_DIR/$name"
+    [[ -f "$dest" ]] || continue
+    expected="$(awk -v a="$name" '$2==a || $2=="./"a {print $1; exit}' "$sums")"
+    [[ -n "$expected" && "$(sha "$dest")" != "$expected" ]] || continue
+    tmp="$(mktemp -p "$CACHE_DIR" ".${name}.XXXXXX")"
+    if curl -fsSL --proto =https --tlsv1.2 "$RELEASE_BASE/$name" -o "$tmp" 2>/dev/null \
+       && [[ "$(sha "$tmp")" == "$expected" ]]; then
+      chmod 755 "$tmp"
+      mv -f "$tmp" "$dest"
+      log "updated $name from $TAG"
+    else
+      rm -f "$tmp"
+      log "could not update $name from $TAG (download or checksum failed); will retry"
+    fi
+  done
+  rm -f "$sums"
 }
 
 # Do not run two reinstalls at the same time.
@@ -175,6 +209,7 @@ if [[ "$PLATFORM" == unsupported:* ]]; then
 fi
 
 # --- Which release are we on, and is a newer one published? --------------------
+REFRESHED=0
 if (( FORCE )) || ! cache_is_fresh; then
   refresh_cache || log "could not refresh the release info (offline?); using the cached one"
 fi
@@ -183,6 +218,11 @@ load_cache || true
 if [[ -z "${TAG:-}" ]]; then
   log "could not resolve the newest release; skipping"
   exit 0
+fi
+
+# At most once per cache period (when the release info was just refreshed).
+if (( REFRESHED )) && [[ "${TOGGLE_GUARD_SELF_UPDATE:-1}" == "1" ]]; then
+  self_update_scripts
 fi
 
 CUR="$(sha "$BIN")"

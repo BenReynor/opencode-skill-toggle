@@ -270,6 +270,13 @@ is updated automatically**, without touching your data.
 - **Restore (off by default)** — if the binary was replaced by something else
   (official autoupdate, `opencode upgrade`…), the guard **leaves it alone** and
   writes one line to its log. See the next section to change that.
+- **Self-update of the scripts** — fixes to the guard, cleanup and uninstall
+  scripts are picked up the same way (verified against `SHA256SUMS.scripts`),
+  so any update published in this repository reaches your machine.
+
+> 🆙 **Upgrading from an earlier version?** Older guards can't update
+> themselves, so **re-run the install command once**. Note that restore is now
+> **off** unless you turn it on (see below).
 - What triggers it on each system:
 
   | System | Mechanism |
