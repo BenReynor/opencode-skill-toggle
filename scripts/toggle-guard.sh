@@ -6,11 +6,14 @@
 # content of every URL never changes) and verifying the SHA256 against
 # SHA256SUMS:
 #
-#   1. Restore — if the opencode binary was replaced (official autoupdate,
-#      "opencode upgrade", or a manual install of the clean binary), the
-#      skill-toggle build is reinstalled.
-#   2. Update — if a newer skill-toggle build has been published, it is
-#      installed. The check is cached, so it costs one API call per hour.
+#   1. Update (always on) — if a newer skill-toggle build has been published,
+#      it is installed. The check is cached, so it costs one API call per hour.
+#   2. Restore (OFF by default) — if the opencode binary was replaced (official
+#      autoupdate, "opencode upgrade", or a manual install of the clean binary),
+#      the skill-toggle build is reinstalled on top. Without it, an official
+#      update is respected and the guard stops touching the binary.
+#      Turn it on with: touch ~/.opencode/toggle-restore
+#      (or install with TOGGLE_RESTORE=1).
 #
 # Call it periodically (systemd .path/.timer, cron, launchd, Task Scheduler…):
 #   bash toggle-guard.sh
@@ -23,7 +26,7 @@
 #     proves that this project installed it: without a marker the binary is
 #     never touched.
 #   - If the current hash differs from the marked one, the binary was replaced
-#     → reinstall.
+#     → reinstall, only when restore is enabled.
 #   - If it matches, the hashes published in the newest release are compared:
 #     a hash that is not published anymore means an older build → update.
 #
@@ -32,6 +35,7 @@
 #   TOGGLE_GUARD_BIN=[path]     binary to watch (default $HOME/.opencode/bin/opencode)
 #   TOGGLE_GUARD_LOG=[path]     log file (default $HOME/.opencode/toggle-guard.log)
 #   TOGGLE_GUARD_CACHE_MIN=[n]  minutes the version check is cached (default 60)
+#   TOGGLE_GUARD_RESTORE=0|1    override the restore setting for this run
 set -euo pipefail
 
 GH_REPO="${GH_REPO:-BenReynor/opencode-skill-toggle}"
@@ -47,6 +51,15 @@ umask 077
 CACHE_TAG="$CACHE_DIR/.toggle-guard-tag"
 CACHE_SUMS="$CACHE_DIR/.toggle-guard-sums"
 CACHE_MIN="${TOGGLE_GUARD_CACHE_MIN:-60}"
+# Restore after an official update is opt-in: the flag file turns it on.
+RESTORE_FLAG="$CACHE_DIR/toggle-restore"
+if [[ -n "${TOGGLE_GUARD_RESTORE:-}" ]]; then
+  RESTORE="$TOGGLE_GUARD_RESTORE"
+elif [[ -f "$RESTORE_FLAG" ]]; then
+  RESTORE=1
+else
+  RESTORE=0
+fi
 
 FORCE=0
 if [[ "${1:-}" == "--update" || "${1:-}" == "-u" ]]; then
@@ -201,6 +214,34 @@ fi
 
 if [[ -z "$REASON" ]]; then
   exit 0
+fi
+
+# Restore disabled (the default): the official update wins. Log once per
+# foreign binary so the user can see why the toggle is gone.
+if [[ "$REASON" == "restore" && "$RESTORE" != "1" ]]; then
+  SKIP_FLAG="$CACHE_DIR/.toggle-guard-skipped"
+  if [[ "$(cat "$SKIP_FLAG" 2>/dev/null || true)" != "$CUR" ]]; then
+    log "opencode was replaced by another build (official update?); restore is off, leaving it alone (enable: touch $RESTORE_FLAG)"
+    printf '%s\n' "$CUR" > "$SKIP_FLAG"
+  fi
+  exit 0
+fi
+
+# Never downgrade across major versions. opencode 2.x migrates the database and
+# the toggle builds only exist for 1.x, so putting a 1.x binary back on top of
+# an autoupdated 2.x would run an older binary against a newer schema. Log once
+# per foreign binary (by hash) so the 15-minute timer does not flood the log.
+if [[ "$REASON" == "restore" ]]; then
+  CUR_VER="$("$BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sed -n '1p' || true)"
+  REL_VER="$(printf '%s\n' "$TAG" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sed -n '1p' || true)"
+  if [[ -n "$CUR_VER" && -n "$REL_VER" && "${CUR_VER%%.*}" -gt "${REL_VER%%.*}" ]]; then
+    SKIP_FLAG="$CACHE_DIR/.toggle-guard-skipped"
+    if [[ "$(cat "$SKIP_FLAG" 2>/dev/null || true)" != "$CUR" ]]; then
+      log "opencode $CUR_VER is newer than the newest skill-toggle build ($REL_VER): not downgrading"
+      printf '%s\n' "$CUR" > "$SKIP_FLAG"
+    fi
+    exit 0
+  fi
 fi
 
 if [[ "$REASON" == "restore" ]]; then

@@ -8,6 +8,9 @@
   Optional:
     $env:GH_REPO = "youruser/opencode-skill-toggle"  before running.
     -Force                                          reinstall even if up to date.
+    -Restore / $env:TOGGLE_RESTORE = "1"            also re-apply the toggle after an
+                                                    official opencode update (off by default).
+    $env:TOGGLE_RESTORE = "0"                       turn that back off.
 
   Downloads the current-platform binary from the newest versioned release,
   backs up the previous installation and replaces %USERPROFILE%\.opencode\bin\opencode.exe.
@@ -15,7 +18,8 @@
 [CmdletBinding()]
 param(
   [string]$Repo = $env:GH_REPO,
-  [switch]$Force
+  [switch]$Force,
+  [switch]$Restore
 )
 
 if (-not $Repo) {
@@ -100,6 +104,25 @@ function Resolve-ReleaseBase {
 }
 $ReleaseBase = Resolve-ReleaseBase
 Write-Step "Release: $($ReleaseBase -replace '^.*/download/','')"
+
+# Refuse to downgrade across major versions: the toggle builds only exist for
+# opencode 1.x, and replacing an installed 2.x would run a 1.x binary against a
+# database that 2.x already migrated.
+if (-not $Force -and (Test-Path -LiteralPath $Final)) {
+  $CurVer = $null
+  try {
+    $out = (& $Final --version 2>$null | Select-Object -First 1)
+    if ("$out" -match '(\d+)\.(\d+)\.(\d+)') { $CurVer = $Matches[0] }
+  } catch { }
+  $RelVer = $null
+  if ($ReleaseBase -match '(\d+)\.(\d+)\.(\d+)') { $RelVer = $Matches[0] }
+  if ($CurVer -and $RelVer -and [int]($CurVer.Split('.')[0]) -gt [int]($RelVer.Split('.')[0])) {
+    # throw, not exit: with `irm | iex` an exit would close the user's console.
+    throw ("Installed opencode is $CurVer, but the newest skill-toggle build is $RelVer. " +
+      "opencode $($CurVer.Split('.')[0]).x is not supported yet; installing would downgrade it. " +
+      "Nothing was changed. Use -Force to install $RelVer anyway (not recommended).")
+  }
+}
 
 $ShaUrl = "$ReleaseBase/SHA256SUMS"
 $ShaTmp = Join-Path $BinDir "opencode-sha256.download"
@@ -223,7 +246,9 @@ if (Test-Path -LiteralPath $Cleanup) {
   }
 }
 
-# --- Anti-overwrite guard (Task Scheduler) -------------------------------------
+# --- Auto-update guard (Task Scheduler) ----------------------------------------
+# toggle-guard.ps1 installs every new skill-toggle build published on GitHub.
+# Re-applying the toggle after an official opencode update is opt-in (below).
 if ($env:TOGGLE_GUARD -ne "0") {
   $Guard = Join-Path $HOME ".opencode\toggle-guard.ps1"
   $LocalGuard = if ($PSScriptRoot) { Join-Path $PSScriptRoot "scripts\toggle-guard.ps1" } else { $null }
@@ -237,12 +262,12 @@ if ($env:TOGGLE_GUARD -ne "0") {
   } else {
     Write-Step "Downloading toggle-guard.ps1"
     if (-not (Install-ScriptFromRelease "toggle-guard.ps1")) {
-      Write-Warning "Could not download toggle-guard.ps1; the anti-overwrite guard will NOT be installed"
+      Write-Warning "Could not download toggle-guard.ps1; the auto-update guard will NOT be installed"
       $Guard = $null
     }
   }
   if (-not $Guard) {
-    Write-Warning "The anti-overwrite guard will NOT be installed"
+    Write-Warning "The auto-update guard will NOT be installed"
   } else {
     $TaskName = "opencode-skill-toggle-guard"
     $Action = New-ScheduledTaskAction -Execute "powershell.exe" `
@@ -255,7 +280,7 @@ if ($env:TOGGLE_GUARD -ne "0") {
       Register-ScheduledTask -TaskName $TaskName -Action $Action `
         -Trigger $TriggerRun, $TriggerLogon -Force | Out-Null
       Start-ScheduledTask -TaskName $TaskName
-      Write-Step "Anti-overwrite guard enabled (Task Scheduler: $TaskName)"
+      Write-Step "Auto-update guard enabled (Task Scheduler: $TaskName)"
       Write-Step "  - log: $(Join-Path $HOME '.opencode\toggle-guard.log')"
       Write-Step "  - disable: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
     } catch {
@@ -263,7 +288,24 @@ if ($env:TOGGLE_GUARD -ne "0") {
     }
   }
 } else {
-  Write-Step "Anti-overwrite guard not installed (TOGGLE_GUARD=0)"
+  Write-Step "Auto-update guard not installed (TOGGLE_GUARD=0)"
+}
+
+# --- Restore after official updates (opt-in) ----------------------------------
+# Unset keeps the current choice, so updating never flips a setting the user
+# made. New installs start with restore off: official updates are respected.
+$RestoreFlag = Join-Path $HOME ".opencode\toggle-restore"
+if ($Restore -or $env:TOGGLE_RESTORE -eq "1") {
+  New-Item -ItemType File -Path $RestoreFlag -Force | Out-Null
+} elseif ($env:TOGGLE_RESTORE -eq "0") {
+  Remove-Item -LiteralPath $RestoreFlag -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path -LiteralPath $RestoreFlag) {
+  Write-Step "Restore after official updates: ON (the toggle is re-applied when opencode updates itself)"
+  Write-Step "  - turn off: Remove-Item `"$RestoreFlag`""
+} else {
+  Write-Step "Restore after official updates: OFF (opencode may update itself; the toggle is then dropped)"
+  Write-Step "  - turn on: New-Item -ItemType File `"$RestoreFlag`"   (or install.ps1 -Restore)"
 }
 
 # --- Uninstaller -----------------------------------------------------------------
@@ -291,9 +333,11 @@ Write-Host @"
 Important notice:
   - This is a custom (non-official) build. It keeps your real opencode.db.
   - When downloading from GitHub Releases, the binary is verified against SHA256SUMS.
-  - The anti-overwrite guard is enabled by default: it restores the toggle if the
-    official update replaces it. (Alternative: "autoupdate": false in
-    opencode.json disables the official autoupdate; see README / Updates.)
+  - The auto-update guard is enabled by default: every new skill-toggle build
+    published on GitHub is installed automatically.
+  - Restore after official updates is OFF by default: if opencode updates
+    itself, that update is respected and the toggle is dropped. Turn it on with
+    install.ps1 -Restore (README, Updates section).
   - As an unsigned binary, Windows SmartScreen may warn you the first time:
       click "More info" > "Run anyway".
   - Automatic residue cleanup on update (removes .bak and temporary files from

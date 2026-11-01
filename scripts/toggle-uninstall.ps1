@@ -3,7 +3,7 @@
   Removes the skill-toggle install and restores official opencode.
 
 .DESCRIPTION
-  Stops and deletes the anti-overwrite guard (Scheduled Task), the helper
+  Stops and deletes the auto-update guard (Scheduled Task), the helper
   scripts, the toggle state and the patched binary. Conversation data,
   settings and snapshots are kept.
 
@@ -50,7 +50,7 @@ if (-not $Installed) {
 }
 
 Say "This will remove the skill-toggle install:"
-Say "  - anti-overwrite guard (Scheduled Task: $TaskName)"
+Say "  - auto-update guard (Scheduled Task: $TaskName)"
 Say "  - helper scripts in $OcDir"
 Say "  - toggle state $Data\skills-toggle.json"
 if ($Purge) {
@@ -163,6 +163,8 @@ if ($Purge) {
 # --- Remove guard state, helper scripts and toggle state --------------------
 Remove-Item -LiteralPath (Join-Path $OcDir ".toggle-guard-tag") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $OcDir ".toggle-guard-sums") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $OcDir ".toggle-guard-skipped") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $OcDir "toggle-restore") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath "$Bin.sha256" -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $OcDir "toggle-guard.ps1") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $OcDir "toggle-cleanup.ps1") -Force -ErrorAction SilentlyContinue
