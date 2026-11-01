@@ -6,7 +6,10 @@
 #   ./install.sh                        # uses the binary next to this script, or
 #                                       # downloads it from the GitHub release
 #   GH_REPO=youruser/opencode-skill-toggle ./install.sh
-#   TOGGLE_GUARD=0 ./install.sh         # don't install the anti-overwrite guard
+#   TOGGLE_GUARD=0 ./install.sh         # don't install the auto-update guard
+#   TOGGLE_RESTORE=1 ./install.sh       # also re-apply the toggle after an official
+#                                       # opencode update (off by default)
+#   TOGGLE_RESTORE=0 ./install.sh       # turn that back off
 #   ./install.sh --force                # reinstall even if already up to date
 #
 # By default it downloads the binary from the newest versioned release and
@@ -178,6 +181,22 @@ SCRIPT_SUMS="$(mktemp "$DL_DIR/.opencode-toggle-scripts-sums.XXXXXX")"
 CLEANUP_FILES+=("$SCRIPT_SUMS")
 echo ">> Release: ${RELEASE_BASE#https://github.com/$GH_REPO/releases/download/}"
 
+# --- Refuse to downgrade across major versions ---------------------------------
+# The toggle builds only exist for opencode 1.x. Replacing an installed 2.x with
+# a 1.x binary would run it against a database that 2.x already migrated.
+if [[ "$FORCE" != "1" && -x "$ORIG" ]]; then
+  CUR_VER="$("$ORIG" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sed -n '1p' || true)"
+  REL_VER="$(printf '%s\n' "${RELEASE_BASE##*/}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sed -n '1p' || true)"
+  if [[ -n "$CUR_VER" && -n "$REL_VER" && "${CUR_VER%%.*}" -gt "${REL_VER%%.*}" ]]; then
+    echo ">> ERROR: installed opencode is $CUR_VER, but the newest skill-toggle build is $REL_VER." >&2
+    echo ">>        This installer only ships 1.x builds; installing would downgrade it." >&2
+    echo ">>        Nothing was changed. Use --force to install $REL_VER anyway (not recommended)." >&2
+    echo ">>        For opencode 2.x install the plugin instead (no binary replacement):" >&2
+    echo ">>          curl -fsSL https://raw.githubusercontent.com/$GH_REPO/main/plugin/install.sh | bash" >&2
+    exit 1
+  fi
+fi
+
 # --- Obtain the binary ------------------------------------------------------
 # A local binary is only used on explicit request (TOGGLE_USE_LOCAL=1). The
 # default is a verified download: with `curl | bash` the "local" file would come
@@ -317,9 +336,10 @@ if [[ -f "$CLEANUP" ]]; then
 fi
 echo
 
-# --- Anti-overwrite guard ---------------------------------------------------
-# If the official installer (autoupdate / "opencode upgrade") replaces the
-# binary, toggle-guard.sh restores it in the background.
+# --- Auto-update guard -------------------------------------------------------
+# toggle-guard.sh runs in the background and installs every new skill-toggle
+# build published on GitHub. Re-applying the toggle after an official opencode
+# update ("restore") is opt-in: TOGGLE_RESTORE=1 creates ~/.opencode/toggle-restore.
 #   - Linux:   systemd --user (.path with inotify + .timer every 15 min)
 #   - macOS:   launchd (LaunchAgent with a 15-min StartInterval)
 #   - Windows: Scheduled Task (handled by install.ps1)
@@ -331,7 +351,7 @@ if [[ "${TOGGLE_GUARD:-1}" == "1" ]]; then
       cp "$SCRIPT_DIR/scripts/toggle-guard.sh" "$GUARD"
     fi
   elif ! download_script "toggle-guard.sh" "$GUARD"; then
-    echo ">> Warning: could not download toggle-guard.sh; anti-overwrite guard NOT installed" >&2
+    echo ">> Warning: could not download toggle-guard.sh; auto-update guard NOT installed" >&2
     GUARD=""
   fi
 
@@ -380,7 +400,7 @@ EOF
         systemctl --user enable --now opencode-toggle-guard.path \
           opencode-toggle-guard.timer >/dev/null 2>&1 || true
         systemctl --user start opencode-toggle-guard.service >/dev/null 2>&1 || true
-        echo ">> Anti-overwrite guard enabled (systemd --user)"
+        echo ">> Auto-update guard enabled (systemd --user)"
         echo ">>   - disable: systemctl --user disable --now opencode-toggle-guard.path opencode-toggle-guard.timer"
       else
         echo ">> Warning: systemd --user not available; add to cron: */15 * * * * $GUARD" >&2
@@ -411,7 +431,7 @@ EOF
 EOF
       launchctl unload "$LA" >/dev/null 2>&1 || true
       if launchctl load -w "$LA" >/dev/null 2>&1; then
-        echo ">> Anti-overwrite guard enabled (launchd: $LA)"
+        echo ">> Auto-update guard enabled (launchd: $LA)"
         echo ">>   - disable: launchctl unload -w $LA"
       else
         echo ">> Warning: could not load LaunchAgent $LA" >&2
@@ -422,10 +442,26 @@ EOF
       echo ">>   add it to cron: */15 * * * * $GUARD"
     fi
   else
-    echo ">> Anti-overwrite guard not installed (download failed)"
+    echo ">> Auto-update guard not installed (download failed)"
   fi
 else
-  echo ">> Anti-overwrite guard not installed (TOGGLE_GUARD=0)"
+  echo ">> Auto-update guard not installed (TOGGLE_GUARD=0)"
+fi
+
+# --- Restore after official updates (opt-in) ---------------------------------
+# Unset keeps the current choice, so updating never flips a setting the user
+# made. New installs start with restore off: official updates are respected.
+RESTORE_FLAG="$HOME/.opencode/toggle-restore"
+case "${TOGGLE_RESTORE:-}" in
+  1) : > "$RESTORE_FLAG" ;;
+  0) rm -f "$RESTORE_FLAG" ;;
+esac
+if [[ -f "$RESTORE_FLAG" ]]; then
+  echo ">> Restore after official updates: ON (the toggle is re-applied when opencode updates itself)"
+  echo ">>   - turn off: rm $RESTORE_FLAG"
+else
+  echo ">> Restore after official updates: OFF (opencode may update itself; the toggle is then dropped)"
+  echo ">>   - turn on: touch $RESTORE_FLAG   (or TOGGLE_RESTORE=1 ./install.sh)"
 fi
 
 # --- Uninstaller ------------------------------------------------------------
@@ -448,10 +484,11 @@ cat <<'EOF'
 Important notice:
   - This is a custom (non-official) build. It keeps your real opencode.db.
   - When downloading from GitHub Releases, the binary is verified against SHA256SUMS.
-  - The anti-overwrite guard is enabled by default: it restores the toggle if the
-    official update replaces it. (Alternative: "autoupdate": false in
-    opencode.json disables the official autoupdate; both are explained in the
-    README, Updates section.)
+  - The auto-update guard is enabled by default: every new skill-toggle build
+    published on GitHub is installed automatically.
+  - Restore after official updates is OFF by default: if opencode updates
+    itself, that update is respected and the toggle is dropped. Turn it on with
+    "touch ~/.opencode/toggle-restore" (README, Updates section).
   - The replacement is atomic: you can reinstall even while opencode is open.
   - Automatic residue cleanup on update (removes .bak and temporary files from
     previous versions; keeps one with TOGGLE_CLEANUP_KEEP_BACKUP=1).

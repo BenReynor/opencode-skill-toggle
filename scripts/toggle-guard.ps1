@@ -6,11 +6,13 @@
   content of every URL never changes) and verifying the SHA256 against
   SHA256SUMS:
 
-    1. Restore — if opencode.exe was replaced (by the official autoupdate, by
-       "opencode upgrade" or by a manual install of the clean binary), it
-       reinstalls the skill-toggle build.
-    2. Update — if a newer skill-toggle build has been published, it installs
-       it. The check is cached, so it costs one API call per hour.
+    1. Update (always on) — if a newer skill-toggle build has been published,
+       it installs it. The check is cached, so it costs one API call per hour.
+    2. Restore (OFF by default) — if opencode.exe was replaced (by the official
+       autoupdate, by "opencode upgrade" or by a manual install of the clean
+       binary), it reinstalls the skill-toggle build on top. Without it, an
+       official update is respected. Turn it on by creating the file
+       %USERPROFILE%\.opencode\toggle-restore (or install.ps1 -Restore).
 
   It is launched by a Scheduled Task created by install.ps1 (every 15 min and at
   logon). You can also run it manually:
@@ -23,6 +25,7 @@
     $env:GH_REPO                 repository (default BenReynor/opencode-skill-toggle)
     $env:TOGGLE_GUARD_LOG        log path (default %USERPROFILE%\.opencode\toggle-guard.log)
     $env:TOGGLE_GUARD_CACHE_MIN  minutes the version check is cached (default 60)
+    $env:TOGGLE_GUARD_RESTORE    0|1, override the restore setting for this run
 #>
 param(
   [switch]$Update
@@ -39,6 +42,9 @@ $CacheDir = Join-Path $HOME ".opencode"
 $CacheTag = Join-Path $CacheDir ".toggle-guard-tag"
 $CacheSums = Join-Path $CacheDir ".toggle-guard-sums"
 $CacheMin = if ($env:TOGGLE_GUARD_CACHE_MIN) { [int]$env:TOGGLE_GUARD_CACHE_MIN } else { 60 }
+# Restore after an official update is opt-in: the flag file turns it on.
+$RestoreFlag = Join-Path $CacheDir "toggle-restore"
+$Restore = if ($env:TOGGLE_GUARD_RESTORE) { $env:TOGGLE_GUARD_RESTORE -eq "1" } else { Test-Path -LiteralPath $RestoreFlag }
 
 function Guard-Log([string]$Msg) {
   $Line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Msg
@@ -71,6 +77,7 @@ function Get-ReleaseInfo {
       New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null
       Set-Content -LiteralPath $CacheTag -Value $tag -NoNewline
       Set-Content -LiteralPath $CacheSums -Value $sumsText -NoNewline
+      $script:Refreshed = $true
     }
     if (-not (Test-Path -LiteralPath $CacheTag)) { return $null }
     $tag = (Get-Content -LiteralPath $CacheTag -Raw).Trim()
@@ -85,10 +92,49 @@ function Get-ReleaseInfo {
   }
 }
 
+# Self-update of the helper scripts. Fixes to the guard, cleanup and uninstall
+# scripts are published next to the binary (SHA256SUMS.scripts). Only scripts
+# that are already installed are replaced, only when their published hash
+# differs, and only after the download matches it. PowerShell parses the whole
+# script before running it, so replacing the running guard is safe.
+function Update-HelperScripts([string]$Base, [string]$Tag) {
+  try {
+    $sumsText = (Invoke-WebRequest -Uri "$Base/SHA256SUMS.scripts" -UseBasicParsing -ErrorAction Stop).Content
+    if ($sumsText -is [byte[]]) { $sumsText = [System.Text.Encoding]::UTF8.GetString($sumsText) }
+  } catch { return }
+  $sums = @{}
+  foreach ($line in ($sumsText -split "`n")) {
+    if ($line -match '^\s*([0-9a-fA-F]{64})\s+(?:\./)?(\S+)') { $sums[$Matches[2]] = $Matches[1].ToLower() }
+  }
+  foreach ($name in @("toggle-guard.ps1", "toggle-cleanup.ps1", "toggle-uninstall.ps1")) {
+    $dest = Join-Path $CacheDir $name
+    if (-not (Test-Path -LiteralPath $dest)) { continue }
+    $expected = $sums[$name]
+    if (-not $expected) { continue }
+    if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLower() -eq $expected) { continue }
+    $tmp = Join-Path $CacheDir ".$name.$PID.download"
+    try {
+      Invoke-WebRequest -Uri "$Base/$name" -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+      if ((Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw "checksum mismatch" }
+      Move-Item -LiteralPath $tmp -Destination $dest -Force
+      Guard-Log "updated $name from $Tag"
+    } catch {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      Guard-Log "could not update $name from $Tag ($($_.Exception.Message)); will retry"
+    }
+  }
+}
+
 if (-not (Test-Path -LiteralPath $Bin)) { exit 0 }
 
+$script:Refreshed = $false
 $Release = Get-ReleaseInfo
 if (-not $Release) { Guard-Log "could not resolve the newest release; skipping"; exit 0 }
+
+# At most once per cache period (when the release info was just refreshed).
+if ($script:Refreshed -and $env:TOGGLE_GUARD_SELF_UPDATE -ne "0") {
+  Update-HelperScripts $Release.Base $Release.Tag
+}
 
 $Cur = (Get-FileHash -LiteralPath $Bin -Algorithm SHA256).Hash.ToLower()
 $Want = if (Test-Path -LiteralPath $Marker) { (Get-Content -LiteralPath $Marker -Raw).Trim().ToLower() } else { "" }
@@ -124,6 +170,41 @@ if ($Reason -eq "update") {
 }
 
 if (-not $Reason) { exit 0 }
+
+# Restore disabled (the default): the official update wins. Log once per
+# foreign binary so the user can see why the toggle is gone.
+if ($Reason -eq "restore" -and -not $Restore) {
+  $SkipFlag = Join-Path $CacheDir ".toggle-guard-skipped"
+  $Prev = if (Test-Path -LiteralPath $SkipFlag) { (Get-Content -LiteralPath $SkipFlag -Raw).Trim() } else { "" }
+  if ($Prev -ne $Cur) {
+    Guard-Log "opencode.exe was replaced by another build (official update?); restore is off, leaving it alone (enable: create $RestoreFlag)"
+    Set-Content -LiteralPath $SkipFlag -Value $Cur -NoNewline
+  }
+  exit 0
+}
+
+# Never downgrade across major versions. opencode 2.x migrates the database and
+# the toggle builds only exist for 1.x, so putting a 1.x binary back on top of
+# an autoupdated 2.x would run an older binary against a newer schema. Log once
+# per foreign binary (by hash) so the scheduled task does not flood the log.
+if ($Reason -eq "restore") {
+  $CurVer = $null
+  try {
+    $out = (& $Bin --version 2>$null | Select-Object -First 1)
+    if ("$out" -match '(\d+)\.(\d+)\.(\d+)') { $CurVer = $Matches[0] }
+  } catch { }
+  $RelVer = $null
+  if ($Release.Tag -match '(\d+)\.(\d+)\.(\d+)') { $RelVer = $Matches[0] }
+  if ($CurVer -and $RelVer -and [int]($CurVer.Split('.')[0]) -gt [int]($RelVer.Split('.')[0])) {
+    $SkipFlag = Join-Path $CacheDir ".toggle-guard-skipped"
+    $Prev = if (Test-Path -LiteralPath $SkipFlag) { (Get-Content -LiteralPath $SkipFlag -Raw).Trim() } else { "" }
+    if ($Prev -ne $Cur) {
+      Guard-Log "opencode $CurVer is newer than the newest skill-toggle build ($RelVer): not downgrading"
+      Set-Content -LiteralPath $SkipFlag -Value $Cur -NoNewline
+    }
+    exit 0
+  }
+}
 
 if ($Reason -eq "restore") {
   Guard-Log "binary differs from the marker (official autoupdate?): reinstalling skill-toggle"

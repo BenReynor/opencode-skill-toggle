@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Removes the skill-toggle install: the anti-overwrite guard, the helper
+# Removes the skill-toggle install: the auto-update guard, the helper
 # scripts, the toggle state and the patched binary.
 #
 # Usage:
@@ -61,7 +61,7 @@ if [[ "$installed" == 0 ]]; then
 fi
 
 say "This will remove the skill-toggle install:"
-say "  - anti-overwrite guard (systemd/launchd)"
+say "  - auto-update guard (systemd/launchd)"
 say "  - helper scripts in $OC_DIR"
 say "  - toggle state $DATA/skills-toggle.json"
 if [[ "$PURGE" == 1 ]]; then
@@ -218,7 +218,8 @@ else
 fi
 
 # --- Remove guard state, helper scripts and toggle state --------------------
-rm -f "$OC_DIR/.toggle-guard-tag" "$OC_DIR/.toggle-guard-sums" "$BIN.sha256"
+rm -f "$OC_DIR/.toggle-guard-tag" "$OC_DIR/.toggle-guard-sums" "$OC_DIR/.toggle-guard-skipped" \
+  "$OC_DIR/toggle-restore" "$BIN.sha256"
 rm -f "$OC_DIR/toggle-guard.sh" "$OC_DIR/toggle-cleanup.sh"
 rm -f "$OC_DIR/toggle-guard.log" "$OC_DIR/toggle-cleanup.log"
 rm -f "$DATA/skills-toggle.json" 2>/dev/null || true
