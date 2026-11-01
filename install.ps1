@@ -119,8 +119,9 @@ if (-not $Force -and (Test-Path -LiteralPath $Final)) {
   if ($CurVer -and $RelVer -and [int]($CurVer.Split('.')[0]) -gt [int]($RelVer.Split('.')[0])) {
     # throw, not exit: with `irm | iex` an exit would close the user's console.
     throw ("Installed opencode is $CurVer, but the newest skill-toggle build is $RelVer. " +
-      "opencode $($CurVer.Split('.')[0]).x is not supported yet; installing would downgrade it. " +
-      "Nothing was changed. Use -Force to install $RelVer anyway (not recommended).")
+      "This installer only ships 1.x builds; installing would downgrade it. Nothing was changed. " +
+      "For opencode 2.x install the plugin instead: irm https://raw.githubusercontent.com/$Repo/main/plugin/install.ps1 | iex " +
+      "(or use -Force to install $RelVer anyway, not recommended).")
   }
 }
 

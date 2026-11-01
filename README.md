@@ -16,10 +16,93 @@ are rejected if someone tries to invoke them.
   <img src="docs/images/02-skills-dialog.png" alt="The /skill-toggle dialog: each skill shows Enabled or Disabled and space toggles it" width="760">
 </p>
 
-> ⚠️ **Compatibility:** skill-toggle is built for the **opencode 1.x** line
-> (currently **1.19.5**). opencode **2.x** has a new architecture and is **not
-> supported yet**. If you already run 2.x, the installer refuses to downgrade
-> you and changes nothing. See [Compatibility](#-compatibility).
+> 🧭 **Which one do I need?** Run `opencode --version`.
+> - **2.x** → install the [**plugin**](#-opencode-2x-the-plugin): one small file,
+>   no binary replacement, and opencode keeps updating normally.
+> - **1.x** → install the [**patched binary**](#-installation-opencode-1x).
+>
+> See [Compatibility](#-compatibility) for the details.
+
+---
+
+## 🆕 opencode 2.x: the plugin
+
+opencode 2.x can already hide skills through permissions, so for 2.x
+skill-toggle is a **TUI plugin** that adds the `/skill-toggle` dialog on top of
+that. It doesn't replace the opencode binary and doesn't touch your sessions.
+
+<p align="center">
+  <img src="docs/images/05-v2-plugin-dialog.png" alt="opencode 2.x: the /skill-toggle plugin dialog with enabled and disabled skills" width="760">
+</p>
+
+### 📥 Install
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/BenReynor/opencode-skill-toggle/main/plugin/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/BenReynor/opencode-skill-toggle/main/plugin/install.ps1 | iex
+```
+
+The installer downloads `skill-toggle-tui.js` from the latest release, **verifies
+its SHA256**, and copies it to `~/.config/opencode/plugins/skill-toggle/tui.js`
+(`$XDG_CONFIG_HOME/opencode/...` if you set it). That's all it does. Restart
+opencode and check it under `/plugins`.
+
+Manual install: copy [`plugin/skill-toggle/tui.js`](plugin/skill-toggle/tui.js)
+to that path. To use it in a single project only, copy it to
+`<project>/.opencode/plugins/skill-toggle/tui.js` instead.
+
+### 🕹️ Use
+
+Open a session and type `/skill-toggle` (it is also in the `ctrl+p` palette):
+
+| Key | Action |
+|-----|--------|
+| `space` / `enter` | Enable or disable the selected skill |
+| `ctrl+d` | Disable all skills in this session |
+| `ctrl+e` | Enable all skills in this session |
+| `esc` | Close |
+
+<p align="center">
+  <img src="docs/images/06-v2-plugin-autocomplete.png" alt="opencode 2.x: typing /skill suggests /skill-toggle" width="760">
+</p>
+
+How it works:
+
+- A disabled skill gets a `deny` rule in **that session's permissions**. opencode
+  then **removes it from the list the model sees** and the `skill` tool
+  **refuses to load it**. The change applies from your next message.
+- The choice is **saved with the session** and survives restarts.
+- Subagent sessions start with a copy of their parent session's permissions.
+- Differences from 1.x: **new sessions start with every skill enabled**, which
+  is opencode 2.x's default. Use `ctrl+d` and then enable the ones you want.
+  Nothing is stored in `skills-toggle.json`.
+
+### 🔄 Updates
+
+- **opencode** updates itself normally. The plugin doesn't stop it, and nothing
+  needs to be restored afterwards.
+- **The plugin updates itself.** At most every 12 hours it compares itself with
+  the copy in this repository's latest release (verified against
+  `SHA256SUMS.scripts`) and replaces itself if they differ. opencode reloads it
+  and shows a toast. This only applies to the global install in
+  `~/.config/opencode/plugins/`. Turn it off with `SKILL_TOGGLE_AUTOUPDATE=0`.
+
+### 🗑️ Uninstall
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/BenReynor/opencode-skill-toggle/main/plugin/install.sh) --uninstall
+# or simply
+rm -rf ~/.config/opencode/plugins/skill-toggle
+```
+
+On Windows delete `%USERPROFILE%\.config\opencode\plugins\skill-toggle`.
+Disabled skills stay disabled in the sessions where you turned them off. Enable
+them before uninstalling if you want them back.
 
 ---
 
@@ -39,7 +122,10 @@ are rejected if someone tries to invoke them.
 
 ---
 
-## 📥 Installation
+## 📥 Installation (opencode 1.x)
+
+> Everything from here down is about the **1.x patched binary**. On opencode
+> 2.x use [the plugin](#-opencode-2x-the-plugin).
 
 ### 🟢 Linux / macOS — a single command
 
@@ -115,7 +201,7 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 
 ---
 
-## 🕹️ How to use
+## 🕹️ How to use (opencode 1.x)
 
 Open the opencode dialog and type:
 
@@ -217,16 +303,16 @@ To remove the patch and return to the official build, run
   [restore](#-keep-the-toggle-after-official-updates-optional).
 
 - **I use opencode 2.x. Can I install it?**
-  Not yet: see [Compatibility](#-compatibility).
+  Yes, as a plugin: see [opencode 2.x: the plugin](#-opencode-2x-the-plugin).
 
 ---
 
 ## 🧩 Compatibility
 
-| opencode | Status |
-|----------|--------|
-| 1.19.x | ✅ Supported (built and tested by CI) |
-| 2.x | ❌ Not supported yet: the 2.x source layout is completely different and the patch does not apply |
+| opencode | What to install | Status |
+|----------|-----------------|--------|
+| 2.x | [The plugin](#-opencode-2x-the-plugin) | ✅ Tested on 2.2.1; uses the public plugin API |
+| 1.19.x | [The patched binary](#-installation-opencode-1x) | ✅ Built and tested by CI |
 
 - The installers check the opencode you have installed. If it is a newer
   **major** version than the newest skill-toggle build, they stop **without

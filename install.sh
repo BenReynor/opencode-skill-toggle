@@ -189,8 +189,10 @@ if [[ "$FORCE" != "1" && -x "$ORIG" ]]; then
   REL_VER="$(printf '%s\n' "${RELEASE_BASE##*/}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sed -n '1p' || true)"
   if [[ -n "$CUR_VER" && -n "$REL_VER" && "${CUR_VER%%.*}" -gt "${REL_VER%%.*}" ]]; then
     echo ">> ERROR: installed opencode is $CUR_VER, but the newest skill-toggle build is $REL_VER." >&2
-    echo ">>        opencode ${CUR_VER%%.*}.x is not supported yet; installing would downgrade it." >&2
+    echo ">>        This installer only ships 1.x builds; installing would downgrade it." >&2
     echo ">>        Nothing was changed. Use --force to install $REL_VER anyway (not recommended)." >&2
+    echo ">>        For opencode 2.x install the plugin instead (no binary replacement):" >&2
+    echo ">>          curl -fsSL https://raw.githubusercontent.com/$GH_REPO/main/plugin/install.sh | bash" >&2
     exit 1
   fi
 fi

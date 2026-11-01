@@ -25,6 +25,7 @@ on:
       - "install.sh"
       - "install.ps1"
       - "build.sh"
+      - "plugin/**"
       - ".github/workflows/build-and-release.yml"
 
 permissions:
@@ -256,9 +257,13 @@ jobs:
       - name: Checksum the scripts
         run: |
           cd "$GITHUB_WORKSPACE/scripts"
+          # The opencode 2.x plugin ships as skill-toggle-tui.js; the plugin
+          # updates itself from this asset after checking it against this file.
+          cp "$GITHUB_WORKSPACE/plugin/skill-toggle/tui.js" "$RUNNER_TEMP/skill-toggle-tui.js"
           sha256sum toggle-guard.sh toggle-guard.ps1 toggle-cleanup.sh toggle-cleanup.ps1 \
             toggle-uninstall.sh toggle-uninstall.ps1 \
             > "$RUNNER_TEMP/SHA256SUMS.scripts"
+          (cd "$RUNNER_TEMP" && sha256sum skill-toggle-tui.js >> SHA256SUMS.scripts)
 
       - name: Publish installers and guards
         env:
@@ -275,7 +280,7 @@ jobs:
               exit 1
             fi
           done
-          FILES+=("$RUNNER_TEMP/SHA256SUMS.scripts")
+          FILES+=("$RUNNER_TEMP/skill-toggle-tui.js" "$RUNNER_TEMP/SHA256SUMS.scripts")
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
             echo "::error::release $TAG does not exist; cannot publish scripts"
             exit 1
