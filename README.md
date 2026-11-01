@@ -12,6 +12,15 @@ Keep all the skills you want installed, but only the ones you have **enabled**
 are actually loaded. Disabled skills stop cluttering the model's suggestions and
 are rejected if someone tries to invoke them.
 
+<p align="center">
+  <img src="docs/images/02-skills-dialog.png" alt="The /skill-toggle dialog: each skill shows Enabled or Disabled and space toggles it" width="760">
+</p>
+
+> ⚠️ **Compatibility:** skill-toggle is built for the **opencode 1.x** line
+> (currently **1.19.5**). opencode **2.x** has a new architecture and is **not
+> supported yet**. If you already run 2.x, the installer refuses to downgrade
+> you and changes nothing. See [Compatibility](#-compatibility).
+
 ---
 
 ## 🚀 What it does
@@ -24,7 +33,8 @@ are rejected if someone tries to invoke them.
 | 🧠 | Each session **remembers its own choices** across restarts |
 | 🆕 | New sessions start clean: only the built-in skill is on |
 | 💾 | Uses the same database: **no lost conversations or settings** |
-| 🛡️ | Guard that restores the toggle if the official update overwrites it (Linux · macOS · Windows) |
+| 🔄 | **Auto-updates itself** whenever a new skill-toggle build is published |
+| 🛡️ | Optional: re-applies the toggle after an official opencode update (off by default) |
 | 🖥️ | Works on **Linux, macOS and Windows** (CLI) |
 
 ---
@@ -58,10 +68,14 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
 > Downloads go to the system temp directory (`$TMPDIR` or `/tmp`); on Windows the
 > binary is staged in `~/.opencode/bin` so the replacement can be atomic.
 >
-> On **Linux, macOS and Windows** the installer leaves the 🛡️ **anti-overwrite
-> guard** enabled by default (systemd / launchd / Task Scheduler): if the official
-> autoupdate replaces your binary, the toggle is restored automatically in the
-> background (disable it with `TOGGLE_GUARD=0`).
+> On **Linux, macOS and Windows** the installer sets up the 🔄 **auto-update
+> guard** (systemd / launchd / Task Scheduler): every new skill-toggle build
+> published in this repository is installed automatically in the background
+> (disable it with `TOGGLE_GUARD=0`).
+>
+> Re-applying the toggle **after an official opencode update** is **off by
+> default**, so opencode can update itself normally. You can turn it on; see
+> [Keep the toggle after official updates](#-keep-the-toggle-after-official-updates-optional).
 
 ### 📦 Manual install
 
@@ -84,7 +98,7 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/BenReynor/opencode
    - **Windows**: `%USERPROFILE%\.opencode\bin\opencode.exe`.
 3. Verify it against `SHA256SUMS` from the same release.
 4. Optional but recommended: run `./install.sh` (Linux/macOS) or `install.ps1`
-   (Windows) **from the repository** to install the 🛡️ guard and the cleanup
+   (Windows) **from the repository** to install the 🔄 auto-update guard and the cleanup
    script. With `TOGGLE_USE_LOCAL=1 ./install.sh` it uses a binary you built
    locally (`./build.sh`) instead of downloading one.
 
@@ -109,7 +123,12 @@ Open the opencode dialog and type:
 /skill-toggle
 ```
 
-Select the skill you want and enable or disable it:
+<p align="center">
+  <img src="docs/images/01-autocomplete.png" alt="Typing /skill in opencode suggests /skill-toggle and /skill-toggle-uninstall" width="760">
+</p>
+
+Move with the arrow keys and press **space** to enable or disable the selected
+skill:
 
 - ✅ **Enabled** — the skill is active and available.
 - ⭕ **Disabled** — the skill is off; it is neither loaded nor invocable.
@@ -126,6 +145,18 @@ disabled. The state lives in `~/.local/share/opencode/skills-toggle.json`
 (`%USERPROFILE%\.local\share\opencode\skills-toggle.json` on Windows).
 If that file is corrupt or was written by a newer version, it is copied to
 `skills-toggle.json.corrupt.bak` / `.v<N>.bak` before a fresh one is created.
+
+### 📸 Screenshots
+
+| Command | What you see |
+|---------|--------------|
+| `/skill-toggle` | ![Skills dialog](docs/images/02-skills-dialog.png) |
+| `/status` | ![Status dialog listing each skill as enabled or disabled](docs/images/04-status.png) |
+| `/skill-toggle-uninstall` | ![Uninstall dialog with Cancel, Restore official opencode and Remove opencode completely](docs/images/03-uninstall.png) |
+
+`/status` lists every skill with a green dot when it is enabled for the current
+session, and `/skill-toggle-uninstall` offers a safe way back to the official
+build (Cancel is the default).
 
 ### 🔌 Query the state via the API (advanced)
 
@@ -180,12 +211,37 @@ To remove the patch and return to the official build, run
   Task (every 15 min and at logon); `install.sh` / `install.ps1` set them up
   automatically.
 
+- **Will skill-toggle stop opencode from updating?**
+  Not by default. Official updates are respected; the toggle is only re-applied
+  on top of them if you enable
+  [restore](#-keep-the-toggle-after-official-updates-optional).
+
+- **I use opencode 2.x. Can I install it?**
+  Not yet: see [Compatibility](#-compatibility).
+
+---
+
+## 🧩 Compatibility
+
+| opencode | Status |
+|----------|--------|
+| 1.19.x | ✅ Supported (built and tested by CI) |
+| 2.x | ❌ Not supported yet: the 2.x source layout is completely different and the patch does not apply |
+
+- The installers check the opencode you have installed. If it is a newer
+  **major** version than the newest skill-toggle build, they stop **without
+  changing anything** (`--force` / `-Force` overrides this; not recommended,
+  because opencode 2.x migrates the database).
+- The guard never puts a 1.x build back on top of an opencode 2.x, even with
+  restore enabled.
+
 ---
 
 ## 🔄 Updates
 
-This repository self-rebuilds: whenever opencode releases a new version, it is
-rebuilt with the toggle and published to a versioned release. That way you always
+This repository self-rebuilds: whenever opencode publishes a new **1.x** release
+(the one GitHub marks as *latest*), it is rebuilt with the toggle and published to
+a versioned release. That way you always
 get the latest version **with** the toggle. It also rebuilds when the **patches**
 change: every release carries a `PATCH_SHA256` asset, so a stale binary is never
 served just because the upstream version number did not move.
@@ -196,26 +252,24 @@ served just because the upstream version number did not move.
 > mixing old/new copies in GitHub's cache (they resolve the most recent `toggle-*`
 > tag through the GitHub API).
 
-The official update replaces `~/.opencode/bin/opencode` (or `opencode.exe`) with
-the clean binary. To make sure the toggle is never lost, the installer leaves the
-**auto-updating anti-overwrite guard enabled by default**:
+### 🔄 Auto-update guard (already set up)
 
-### 🛡️ Anti-overwrite guard (already set up)
-
-It keeps the toggle up to date automatically, without touching your data:
+The installer sets up a small background guard that keeps skill-toggle up to
+date: **when a new build is published in this repository, your installed toggle
+is updated automatically**, without touching your data.
 
 - After installing it leaves a **marker** with the SHA-256 of the toggle binary
   (an `opencode.sha256` next to the binary). Without that marker the guard
   **never** touches an unknown binary.
-- **Restore** — if the binary was replaced (official autoupdate, `opencode upgrade`
-  or any other means), the guard downloads the newest `toggle-*` build,
-  **verifies its SHA256** against `SHA256SUMS`, makes a backup, replaces it
-  atomically (without interrupting what is running) and only updates the marker if
-  the new binary actually runs.
-- **Proactive update** — if a newer `toggle-*` build was published, the guard
+- **Update (always on)** — if a newer `toggle-*` build was published, the guard
   detects it by comparing your binary's hash against the hashes in the newest
-  release and updates it automatically. The version check is cached (1 hour by
-  default) to avoid exhausting the API rate limit.
+  release, downloads it, **verifies its SHA256** against `SHA256SUMS`, makes a
+  backup, replaces it atomically (without interrupting what is running) and only
+  updates the marker if the new binary actually runs. The version check is
+  cached (1 hour by default) to avoid exhausting the API rate limit.
+- **Restore (off by default)** — if the binary was replaced by something else
+  (official autoupdate, `opencode upgrade`…), the guard **leaves it alone** and
+  writes one line to its log. See the next section to change that.
 - What triggers it on each system:
 
   | System | Mechanism |
@@ -259,6 +313,42 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.opencode\
 
 Activity log: `~/.opencode/toggle-guard.log`.
 
+### 🔁 Keep the toggle after official updates (optional)
+
+opencode updates itself (autoupdate or `opencode upgrade`), and that replaces
+the skill-toggle binary with the official one. **By default skill-toggle respects
+that**: opencode updates normally and you lose the toggle until you reinstall.
+
+If you would rather keep the toggle, turn on **restore**: the guard then
+re-applies the newest skill-toggle build on top of every official update.
+
+```bash
+# turn on (Linux / macOS)
+touch ~/.opencode/toggle-restore
+# or when installing
+curl -sL https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.sh | TOGGLE_RESTORE=1 bash
+
+# turn off
+rm ~/.opencode/toggle-restore          # or: TOGGLE_RESTORE=0 ./install.sh
+```
+
+```powershell
+# turn on (Windows)
+New-Item -ItemType File "$HOME\.opencode\toggle-restore"
+# or when installing
+$env:TOGGLE_RESTORE = "1"; irm https://github.com/BenReynor/opencode-skill-toggle/releases/download/latest/install.ps1 | iex
+
+# turn off
+Remove-Item "$HOME\.opencode\toggle-restore"
+```
+
+Re-running the installer **without** `TOGGLE_RESTORE` keeps your current choice.
+
+> ℹ️ With restore on, an official update to a newer 1.x version is replaced by
+> the newest skill-toggle build, which may be a few hours behind until CI
+> rebuilds it. A move to opencode **2.x** is never undone (see
+> [Compatibility](#-compatibility)).
+
 ### 🧹 Automatic residue cleanup
 
 On every install/restore, leftovers from previous versions are removed
@@ -281,9 +371,8 @@ Log: `~/.opencode/toggle-cleanup.log`.
 
 **Alternative — disable the official autoupdate**
 
-If you prefer that the official installer never touches your binary (which makes
-the guard unnecessary, though it doesn't get in the way either), disable
-autoupdate in `opencode.json`:
+If you prefer that opencode never replaces your binary at all, disable its
+autoupdate in `opencode.json` (the auto-update guard keeps working):
 
 ```json
 {
@@ -303,6 +392,10 @@ Inside opencode run:
 ```
 /skill-toggle-uninstall
 ```
+
+<p align="center">
+  <img src="docs/images/03-uninstall.png" alt="Uninstall dialog" width="760">
+</p>
 
 and choose one of:
 
