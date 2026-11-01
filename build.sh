@@ -6,16 +6,19 @@
 # with tar and applies the patches with `patch -p1` (irreversible, but with no
 # dependency on git or a clone).
 #
+# Only the 1.x line is supported: opencode 2.x has a different source layout
+# and the patch does not apply to it yet.
+#
 # Usage:
-#   ./build.sh                 # compiles the pinned validated version (1.19.4)
+#   ./build.sh                 # compiles the pinned validated version (1.19.5)
 #   ./build.sh latest          # compiles the latest published version (requires updating patches)
-#   ./build.sh 1.19.4          # compiles a specific version
+#   ./build.sh 1.19.5          # compiles a specific version
 #   MINIFY=0 ./build.sh        # without minification (debugging only)
 #   KEEP_SRC=1 ./build.sh      # accepted for compatibility (source is kept anyway)
 #
 set -euo pipefail
 
-VERSION="${1:-1.19.4}"
+VERSION="${1:-1.19.5}"
 WORK="/tmp/opencode-toggle-build"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$WORK/src/opencode-$VERSION"
@@ -23,7 +26,7 @@ SRC="$WORK/src/opencode-$VERSION"
 resolve_tag() {
   if [[ "$VERSION" == "latest" ]]; then
     echo ">> WARNING: 'latest' may require updating the patches." >&2
-    echo ">>          the patches are validated for 1.19.4." >&2
+    echo ">>          the patches are validated for 1.19.5." >&2
     # Get the latest published release (skips pre-releases; no git needed)
     curl -fsSL --proto =https --tlsv1.2 "https://api.github.com/repos/anomalyco/opencode/releases/latest" \
       | grep -oE '"tag_name": *"[^"]+"' | head -1 | sed 's/.*"v\([0-9.]*\)".*/\1/'
@@ -35,7 +38,7 @@ resolve_tag() {
 VER="$(resolve_tag)"
 TAG="v$VER"
 if [[ -z "$VER" || "$VER" == ".*" ]]; then
-  echo ">> Could not resolve the version. Usage: ./build.sh [1.19.4|latest]" >&2
+  echo ">> Could not resolve the version. Usage: ./build.sh [1.19.5|latest]" >&2
   exit 1
 fi
 echo ">> Building opencode $VER (tag $TAG)"
@@ -57,7 +60,6 @@ rm -f "$WORK/src/opencode-$VER.tar.gz"
 echo ">> Applying patches..."
 cd "$SRC"
 patch -p1 --forward < "$SCRIPT_DIR/patches/00-skill-toggle.patch"
-# 01-build-local-fix.patch (MINIFY/SPLIT env vars) is now upstream in v1.19.4+
 echo ">> Patches applied."
 
 echo ">> Installing dependencies..."
